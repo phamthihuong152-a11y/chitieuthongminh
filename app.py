@@ -1,17 +1,29 @@
 from flask import Flask, request, redirect, url_for, flash, Response, render_template_string
-import sqlite3, csv, io
+import os, sqlite3, csv, io
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import date, datetime
 
 app = Flask(__name__)
-app.secret_key = "local-demo-change-before-deployment"
-DB = Path(__file__).with_name("chi_tieu.db")
+app.secret_key = os.environ.get("SECRET_KEY", "local-demo-change-before-deployment")
+DB = Path(os.environ.get("DB_PATH", Path(__file__).with_name("chi_tieu.db")))
+MAX_AMOUNT = 10**12  # giới hạn số tiền để tránh tràn số trong SQLite
 
+
+@contextmanager
 def db():
+    """Mở kết nối, tự commit khi thành công, rollback khi lỗi và luôn đóng kết nối."""
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys=ON")
-    return c
+    try:
+        yield c
+        c.commit()
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
 
 def init_db():
     with db() as c:
@@ -43,17 +55,17 @@ DASH = r"""{% extends base %}{% block body %}
 <div class="row"><div><p class="muted small">TỔNG QUAN TÀI CHÍNH</p><h1>Chi tiêu của bạn</h1><span class="muted">Theo dõi dòng tiền theo tháng.</span></div><form method="get" style="display:flex;gap:8px;align-items:end"><div><label>Tháng</label><input type="month" name="month" value="{{ month }}"></div><button class="btn">Xem</button></form></div>
 <div class="cards"><div class="card"><span class="muted">Tổng thu</span><div class="stat green">{{ income|money }}</div></div><div class="card"><span class="muted">Tổng chi</span><div class="stat red">{{ expense|money }}</div></div><div class="card"><span class="muted">Số dư ròng</span><div class="stat">{{ (income-expense)|money }}</div></div></div>
 <div class="panel"><h2>Chi tiêu theo danh mục</h2>{% if bycat %}{% for x in bycat %}<div style="margin:14px 0"><div class="row" style="margin:0"><span>{{ x.name }}</span><b>{{ x.total|money }}</b></div><div class="bar"><div class="fill" style="width:{{ (x.total/maxcat*100)|round }}%"></div></div></div>{% endfor %}{% else %}<div class="empty">Chưa có dữ liệu chi tiêu. <a class="link" href="/transactions/new">Thêm giao dịch</a></div>{% endif %}</div>
-<div class="panel"><div class="row"><h2>Ngân sách tháng {{ month }}</h2><a class="link" href="/budgets?month={{ month }}">Quản lý ngân sách →</a></div>{% if budgets %}{% for b in budgets %}{% set pct=b.spent/b.limit_amount*100 %}<div class="budget"><div class="row" style="margin:0"><b>{{ b.name }}</b><span>{{ b.spent|money }} / {{ b.limit_amount|money }} · {{ pct|round|int }}%</span></div><div class="bar"><div class="fill {{ 'over' if pct>=100 else ('warn' if pct>=80 else '') }}" style="width:{{ [pct,100]|min }}%"></div></div>{% if pct>=80 %}<span class="red small">{{ 'Đã vượt ngân sách' if pct>=100 else 'Sắp chạm hạn mức' }}</span>{% endif %}</div>{% endfor %}{% else %}<p class="muted">Chưa đặt ngân sách cho tháng này.</p>{% endif %}</div>
+<div class="panel"><div class="row"><h2>Ngân sách tháng {{ month }}</h2><a class="link" href="/budgets?month={{ month }}">Quản lý ngân sách →</a></div>{% if budgets %}{% for b in budgets %}{% set pct=b.spent/b.limit_amount*100 %}<div class="budget"><div class="row" style="margin:0"><b>{{ b.name }}</b><span>{{ b.spent|money }} / {{ b.limit_amount|money }} · {{ pct|round|int }}%</span></div><div class="bar"><div class="fill {{ 'over' if pct>=100 else ('warn' if pct>=80 else '') }}" style="width:{{ [pct,100]|min }}%"></div></div>{% if pct>=80 %}<span class="red small">{{ 'Đã vượt ngân sách' if pct>=100 else 'Đã dùng ít nhất 80% ngân sách' }}</span>{% endif %}</div>{% endfor %}{% else %}<p class="muted">Chưa đặt ngân sách cho tháng này.</p>{% endif %}</div>
 <div class="panel"><div class="row"><h2>Giao dịch gần đây</h2><a class="link" href="/transactions?month={{ month }}">Xem tất cả →</a></div>{% if recent %}<div class="tablewrap"><table><thead><tr><th>Ngày</th><th>Danh mục</th><th>Ghi chú</th><th>Loại</th><th class="right">Số tiền</th><th></th></tr></thead><tbody>{% for t in recent %}<tr><td>{{ t.tx_date }}</td><td>{{ t.category }}</td><td>{{ t.note or '—' }}</td><td>{{ 'Thu' if t.kind=='income' else 'Chi' }}</td><td class="right {{ 'green' if t.kind=='income' else 'red' }}">{{ t.amount|money }}</td><td><a class="link" href="/transactions/{{ t.id }}/edit">Sửa</a></td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="muted">Chưa có giao dịch.</p>{% endif %}</div>{% endblock %}"""
 LIST = r"""{% extends base %}{% block body %}
 <div class="row"><div><h1>Giao dịch</h1><p class="muted">Thêm, sửa, xóa và lọc các khoản thu chi.</p></div><a class="btn" href="/transactions/new">+ Thêm giao dịch</a></div>
 <form class="panel filters" method="get"><div><label>Tháng</label><input type="month" name="month" value="{{ month }}"></div><div><label>Loại</label><select name="kind"><option value="">Tất cả</option><option value="income" {{ 'selected' if kind=='income' }}>Thu</option><option value="expense" {{ 'selected' if kind=='expense' }}>Chi</option></select></div><div><label>Danh mục</label><select name="category_id"><option value="">Tất cả</option>{% for c in cats %}<option value="{{ c.id }}" {{ 'selected' if category_id|string==c.id|string }}>{{ c.name }}</option>{% endfor %}</select></div><div><label>Tìm ghi chú</label><input name="q" value="{{ q }}" placeholder="Tìm kiếm..."></div><button class="btn">Lọc</button><a class="btn light" href="/transactions">Xóa lọc</a><a class="btn light" href="{{ export_url }}">Xuất CSV</a></form>
 <div class="panel"><p class="muted">{{ rows|length }} giao dịch</p>{% if rows %}<div class="tablewrap"><table><thead><tr><th>Ngày</th><th>Danh mục</th><th>Ghi chú</th><th>Loại</th><th class="right">Số tiền</th><th>Thao tác</th></tr></thead><tbody>{% for t in rows %}<tr><td>{{ t.tx_date }}</td><td>{{ t.category }}</td><td>{{ t.note or '—' }}</td><td>{{ 'Thu' if t.kind=='income' else 'Chi' }}</td><td class="right {{ 'green' if t.kind=='income' else 'red' }}">{{ t.amount|money }}</td><td><div class="actions"><a class="link" href="/transactions/{{ t.id }}/edit">Sửa</a><form method="post" action="/transactions/{{ t.id }}/delete" onsubmit="return confirm('Xóa giao dịch này?')"><button class="btn danger">Xóa</button></form></div></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">Không có giao dịch phù hợp.</div>{% endif %}</div>{% endblock %}"""
 FORM = r"""{% extends base %}{% block body %}<div class="row"><div><h1>{{ title }}</h1><p class="muted">Số tiền phải lớn hơn 0.</p></div><a class="btn light" href="/transactions">Quay lại</a></div>
-<form class="panel formgrid" method="post"><div><label>Loại giao dịch *</label><select id="kind" name="kind"><option value="expense" {{ 'selected' if not row or row.kind=='expense' }}>Chi</option><option value="income" {{ 'selected' if row and row.kind=='income' }}>Thu</option></select></div><div><label>Số tiền (VND) *</label><input name="amount" type="number" min="1" step="1" required value="{{ row.amount if row else '' }}" placeholder="150000"></div><div><label>Ngày *</label><input name="tx_date" type="date" required value="{{ row.tx_date if row else today }}"></div><div><label>Danh mục *</label><select id="category" name="category_id" required>{% for c in cats %}<option value="{{ c.id }}" data-kind="{{ c.kind }}" {{ 'selected' if row and row.category_id==c.id }}>{{ c.name }} ({{ 'Thu' if c.kind=='income' else 'Chi' }})</option>{% endfor %}</select></div><div class="full"><label>Ghi chú</label><textarea name="note" rows="3" maxlength="300">{{ row.note if row else '' }}</textarea></div><div class="full" style="display:flex;justify-content:flex-end;gap:8px"><a class="btn light" href="/transactions">Hủy</a><button class="btn">Lưu giao dịch</button></div></form>
+<form class="panel formgrid" method="post"><div><label>Loại giao dịch *</label><select id="kind" name="kind"><option value="expense" {{ 'selected' if not row or row.kind=='expense' }}>Chi</option><option value="income" {{ 'selected' if row and row.kind=='income' }}>Thu</option></select></div><div><label>Số tiền (VND) *</label><input name="amount" type="number" min="1" max="1000000000000" step="1" required value="{{ row.amount if row else '' }}" placeholder="150000"></div><div><label>Ngày *</label><input name="tx_date" type="date" required value="{{ row.tx_date if row else today }}"></div><div><label>Danh mục *</label><select id="category" name="category_id" required>{% for c in cats %}<option value="{{ c.id }}" data-kind="{{ c.kind }}" {{ 'selected' if row and row.category_id==c.id }}>{{ c.name }} ({{ 'Thu' if c.kind=='income' else 'Chi' }})</option>{% endfor %}</select></div><div class="full"><label>Ghi chú</label><textarea name="note" rows="3" maxlength="300">{{ row.note if row else '' }}</textarea></div><div class="full" style="display:flex;justify-content:flex-end;gap:8px"><a class="btn light" href="/transactions">Hủy</a><button class="btn">Lưu giao dịch</button></div></form>
 <script>const k=document.getElementById('kind'),c=document.getElementById('category');function filter(){let valid=false;for(const o of c.options){o.disabled=o.dataset.kind!==k.value;o.hidden=o.disabled;if(o.selected&&!o.disabled)valid=true}if(!valid){const o=[...c.options].find(x=>!x.disabled);if(o)c.value=o.value}}k.addEventListener('change',filter);filter();</script>{% endblock %}"""
 BUDGETS = r"""{% extends base %}{% block body %}<div class="row"><div><h1>Ngân sách</h1><p class="muted">Thiết lập hạn mức chi theo tháng và danh mục.</p></div></div>
-<div class="panel"><h2>Thiết lập ngân sách</h2><form method="post" class="filters"><div><label>Tháng</label><input type="month" name="month" value="{{ month }}" required></div><div><label>Danh mục chi</label><select name="category_id" required>{% for c in cats %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div><div><label>Hạn mức (VND)</label><input type="number" min="1" name="limit_amount" required placeholder="2000000"></div><button class="btn">Lưu ngân sách</button></form></div>
+<div class="panel"><h2>Thiết lập ngân sách</h2><form method="post" class="filters"><div><label>Tháng</label><input type="month" name="month" value="{{ month }}" required></div><div><label>Danh mục chi</label><select name="category_id" required>{% for c in cats %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div><div><label>Hạn mức (VND)</label><input type="number" min="1" max="1000000000000" name="limit_amount" required placeholder="2000000"></div><button class="btn">Lưu ngân sách</button></form></div>
 <div class="panel"><div class="row"><h2>Ngân sách tháng {{ month }}</h2><form method="get" style="display:flex;gap:8px"><input type="month" name="month" value="{{ month }}"><button class="btn light">Xem</button></form></div>{% if rows %}{% for b in rows %}{% set pct=b.spent/b.limit_amount*100 %}<div class="budget"><div class="row" style="margin:0"><div><b>{{ b.name }}</b><p class="muted small">{{ b.spent|money }} / {{ b.limit_amount|money }}</p></div><div class="actions"><b class="{{ 'red' if pct>=100 else ('green' if pct<80 else '') }}">{{ pct|round|int }}%</b><form method="post" action="/budgets/{{ b.id }}/delete" onsubmit="return confirm('Xóa ngân sách?')"><button class="btn danger">Xóa</button></form></div></div><div class="bar"><div class="fill {{ 'over' if pct>=100 else ('warn' if pct>=80 else '') }}" style="width:{{ [pct,100]|min }}%"></div></div><p class="small {{ 'red' if pct>=80 else 'muted' }}">{{ 'Đã vượt ngân sách' if pct>=100 else ('Đã dùng ít nhất 80% ngân sách' if pct>=80 else 'Còn lại '+((b.limit_amount-b.spent)|money)) }}</p></div>{% endfor %}{% else %}<p class="muted">Chưa có ngân sách cho tháng này.</p>{% endif %}</div>{% endblock %}"""
 
 def page(template, **kwargs):
@@ -97,14 +109,14 @@ def save_tx(txid=None):
     kind=request.form.get("kind",""); amount=request.form.get("amount",""); tx_date=request.form.get("tx_date",""); cat=request.form.get("category_id",""); note=request.form.get("note","").strip()
     try:
         amount=int(amount); datetime.strptime(tx_date,"%Y-%m-%d")
-        if kind not in ("income","expense") or amount<=0: raise ValueError
+        if kind not in ("income","expense") or amount<=0 or amount>MAX_AMOUNT: raise ValueError
         with db() as c:
             category=c.execute("SELECT * FROM categories WHERE id=?",(cat,)).fetchone()
             if not category or category["kind"]!=kind: raise ValueError
             if txid: c.execute("UPDATE transactions SET kind=?,amount=?,tx_date=?,category_id=?,note=? WHERE id=?",(kind,amount,tx_date,int(cat),note,txid))
             else: c.execute("INSERT INTO transactions(kind,amount,tx_date,category_id,note) VALUES(?,?,?,?,?)",(kind,amount,tx_date,int(cat),note))
         flash("Đã lưu giao dịch.","success"); return redirect(url_for("tx_list"))
-    except (ValueError,TypeError):
+    except (ValueError,TypeError,OverflowError):
         flash("Dữ liệu không hợp lệ. Kiểm tra số tiền, ngày và danh mục.","error"); return None
 
 @app.route("/transactions/new",methods=["GET","POST"])
@@ -138,10 +150,10 @@ def budget_page():
             amount=int(amount)
             with db() as c:
                 category=c.execute("SELECT * FROM categories WHERE id=? AND kind='expense'",(cat,)).fetchone()
-                if not category or amount<=0: raise ValueError
+                if not category or amount<=0 or amount>MAX_AMOUNT: raise ValueError
                 c.execute("INSERT INTO budgets(month,category_id,limit_amount) VALUES(?,?,?) ON CONFLICT(month,category_id) DO UPDATE SET limit_amount=excluded.limit_amount",(month,int(cat),amount))
             flash("Đã lưu ngân sách.","success"); return redirect(url_for("budget_page",month=month))
-        except (ValueError,TypeError): flash("Chọn danh mục và nhập hạn mức lớn hơn 0.","error")
+        except (ValueError,TypeError,OverflowError): flash("Chọn danh mục và nhập hạn mức lớn hơn 0.","error")
     with db() as c:
         rows=c.execute("""SELECT b.*,ca.name,COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.category_id=b.category_id AND t.kind='expense' AND substr(t.tx_date,1,7)=b.month),0) spent FROM budgets b JOIN categories ca ON ca.id=b.category_id WHERE b.month=? ORDER BY ca.name""",(month,)).fetchall()
     return page(BUDGETS,title="Ngân sách",month=month,rows=rows,cats=[x for x in categories() if x["kind"]=="expense"])
@@ -172,6 +184,8 @@ def health(): return {"status":"ok","database":DB.name}
 
 init_db()
 if __name__=="__main__":
+    # Có PORT (môi trường container/PaaS) -> nghe 0.0.0.0 để proxy bên ngoài (Traefik...) truy cập được.
+    # Chạy local không đặt PORT -> chỉ nghe 127.0.0.1 cho an toàn.
     port = int(os.environ.get("PORT", 5000))
     host = os.environ.get("HOST") or ("0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
     app.run(host=host, port=port, debug=os.environ.get("FLASK_DEBUG")=="1")
