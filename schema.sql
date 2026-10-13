@@ -1,36 +1,26 @@
--- Chi Tiêu Thông Minh - Database Schema (SQLite)
--- Theo PRD v1.0
+-- Lược đồ cơ sở dữ liệu Chi Tiêu Thông Minh (Khớp chuẩn với app.py)
 
-CREATE TABLE categories (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL CHECK(type IN ('income', 'expense'))
+CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('income','expense'))
 );
 
-CREATE TABLE transactions (
-    id TEXT PRIMARY KEY,
-    type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
-    amount REAL NOT NULL CHECK(amount > 0),
-    date TEXT NOT NULL,                    -- YYYY-MM-DD
-    category_id TEXT NOT NULL,
-    note TEXT,
-    created_at TEXT NOT NULL,              -- ISO datetime
-    FOREIGN KEY (category_id) REFERENCES categories(id)
+CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('income','expense')),
+    amount INTEGER NOT NULL CHECK(amount>0),
+    tx_date TEXT NOT NULL,
+    category_id INTEGER NOT NULL REFERENCES categories(id),
+    note TEXT DEFAULT ''
 );
 
-CREATE TABLE budgets (
-    id TEXT PRIMARY KEY,
-    month INTEGER NOT NULL CHECK(month BETWEEN 1 AND 12),
-    year INTEGER NOT NULL,
-    category_id TEXT,                      -- NULL = ngân sách tổng chi tiêu
-    limit_amount REAL NOT NULL CHECK(limit_amount > 0),
-    FOREIGN KEY (category_id) REFERENCES categories(id)
+CREATE TABLE IF NOT EXISTS budgets (
+    id INTEGER PRIMARY KEY,
+    month TEXT NOT NULL,
+    category_id INTEGER NOT NULL REFERENCES categories(id),
+    limit_amount INTEGER NOT NULL CHECK(limit_amount>0),
+    UNIQUE(month, category_id)
 );
 
-CREATE INDEX idx_tx_date ON transactions(date);
-CREATE INDEX idx_tx_type ON transactions(type);
-CREATE INDEX idx_tx_category ON transactions(category_id);
-CREATE INDEX idx_budget_period ON budgets(year, month);
-
--- Dữ liệu mẫu đã có sẵn trong file chi_tieu.db
--- Tổng thu: 17.000.000 | Tổng chi: 5.650.000 | Số dư: 11.350.000
+-- Dữ liệu mẫu khởi tạo tự động qua app.init_db() khi chạy ứng dụng lần đầu.
