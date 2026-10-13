@@ -1,46 +1,34 @@
-# Chi Tiêu Thông Minh
+# Chi Tiêu Thông Minh — Ứng dụng Quản lý Tài chính (Flask + SQLite)
 
-Website quản lý thu chi và ngân sách cá nhân theo PRD v1.0.
+Ứng dụng quản lý thu chi cá nhân xây dựng bằng Python (Flask Framework) và cơ sở dữ liệu SQLite, chạy trên máy chủ cục bộ hoặc môi trường cloud.
 
-## Cách chạy
+## Tính năng chính
+- Quản lý giao dịch thu/chi (Thêm, Sửa, Xóa) với kiểm tra dữ liệu hợp lệ (validation).
+- Hệ thống 11 danh mục mặc định phân loại rõ ràng theo Thu nhập và Chi tiêu.
+- Dashboard tổng quan: Hiển thị tổng thu, tổng chi, số dư ròng và phân bổ chi tiêu theo danh mục trong tháng.
+- Quản lý ngân sách: Thiết lập hạn mức chi theo tháng/danh mục, tự động tính tỷ lệ % thực chi, cảnh báo khi đạt từ 80% và thông báo khi vượt hạn mức.
+- Bộ lọc giao dịch linh hoạt theo tháng, loại, danh mục và từ khóa ghi chú.
+- Xuất dữ liệu ra file CSV chuẩn mã hóa tiếng Việt (UTF-8 BOM) tương thích tuyệt đối với Microsoft Excel.
+- Dữ liệu lưu trữ bền vững trên tệp cơ sở dữ liệu SQLite (`chi_tieu.db`).
 
-Mở file `index.html` bằng trình duyệt (Chrome, Edge, Firefox...).
+## Cài đặt và Chạy trên Windows / Linux / macOS
 
-Hoặc dùng live server:
+1. Cài đặt Python 3.10+ từ [python.org](https://www.python.org/) (đảm bảo tích chọn *Add Python to PATH*).
+2. Tải hoặc giải nén mã nguồn vào thư mục dự án.
+3. Mở Terminal / Command Prompt tại thư mục dự án và chạy các lệnh sau:
 
 ```bash
-npx serve .
-# hoặc
-python3 -m http.server 8080
-```
+# Tạo môi trường ảo (tùy chọn nhưng khuyến nghị)
+python -m venv .venv
+# Kích hoạt môi trường ảo:
+# Trên Windows:
+.venv\Scripts\activate
+# Trên macOS/Linux:
+source .venv/bin/activate
 
-Sau đó truy cập `http://localhost:8080`.
+# Nâng cấp pip và cài đặt thư viện phụ thuộc
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 
-## Tính năng đã có
-
-- **Dashboard**: Tổng thu / tổng chi / số dư ròng theo tháng, biểu đồ cơ cấu chi tiêu, cảnh báo ngân sách, giao dịch gần đây
-- **Giao dịch**: Thêm / sửa / xóa, lọc theo từ khóa, loại, danh mục, tháng
-- **Ngân sách**: Tạo hạn mức theo tháng (tổng hoặc theo danh mục), hiển thị % sử dụng, cảnh báo 80% và vượt ngân sách
-- **Danh mục**: Danh mục mặc định + thêm danh mục cá nhân
-- **Xuất CSV**: Xuất giao dịch theo bộ lọc
-
-## Dữ liệu
-
-- Lưu trong **localStorage** của trình duyệt (không cần backend)
-- Có sẵn dữ liệu mẫu (lương 15tr + các khoản chi) để demo ngay
-- Muốn reset dữ liệu: mở DevTools → Application → Local Storage → xóa các key `cttm_*`
-
-## Kiểm thử theo PRD
-
-| Tiêu chí | Kết quả |
-|----------|---------|
-| Thêm/sửa/xóa giao dịch | ✅ |
-| Dữ liệu còn sau reload | ✅ (localStorage) |
-| Tổng thu 15tr, chi ~5.65tr → số dư đúng | ✅ |
-| Cảnh báo ngân sách 80% / vượt | ✅ |
-| Xuất CSV | ✅ |
-| Responsive mobile | ✅ |
-
-## Lưu ý
-
-Đây là bản demo frontend-only. Nếu cần backend thật (SQLite/Postgres + auth) có thể mở rộng sau.
+# Khởi chạy ứng dụng
+python app.py
