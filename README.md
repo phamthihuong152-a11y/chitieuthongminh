@@ -1,34 +1,60 @@
-# Chi Tiêu Thông Minh — Ứng dụng Quản lý Tài chính (Flask + SQLite)
+# Chi Tiêu Thông Minh
 
-Ứng dụng quản lý thu chi cá nhân xây dựng bằng Python (Flask Framework) và cơ sở dữ liệu SQLite, chạy trên máy chủ cục bộ hoặc môi trường cloud.
+Website quản lý thu chi cá nhân, dùng Flask + SQLite. Có **đăng ký / đăng nhập**, mỗi tài khoản có dữ liệu riêng.
 
-## Tính năng chính
-- Quản lý giao dịch thu/chi (Thêm, Sửa, Xóa) với kiểm tra dữ liệu hợp lệ (validation).
-- Hệ thống 11 danh mục mặc định phân loại rõ ràng theo Thu nhập và Chi tiêu.
-- Dashboard tổng quan: Hiển thị tổng thu, tổng chi, số dư ròng và phân bổ chi tiêu theo danh mục trong tháng.
-- Quản lý ngân sách: Thiết lập hạn mức chi theo tháng/danh mục, tự động tính tỷ lệ % thực chi, cảnh báo khi đạt từ 80% và thông báo khi vượt hạn mức.
-- Bộ lọc giao dịch linh hoạt theo tháng, loại, danh mục và từ khóa ghi chú.
-- Xuất dữ liệu ra file CSV chuẩn mã hóa tiếng Việt (UTF-8 BOM) tương thích tuyệt đối với Microsoft Excel.
-- Dữ liệu lưu trữ bền vững trên tệp cơ sở dữ liệu SQLite (`chi_tieu.db`).
+## Tính năng
+- Đăng ký, đăng nhập, đăng xuất; mật khẩu được băm (không lưu dạng thô).
+- CRUD giao dịch thu/chi, danh mục mặc định.
+- Dashboard tổng thu, tổng chi, số dư theo tháng; biểu đồ chi tiêu theo danh mục.
+- Ngân sách theo tháng/danh mục, cảnh báo từ 80% và khi vượt hạn mức.
+- Lọc theo tháng, loại, danh mục; tìm ghi chú; xuất CSV (UTF-8 BOM, mở được bằng Excel).
+- Giao diện responsive cho máy tính/điện thoại.
 
-## Cài đặt và Chạy trên Windows / Linux / macOS
+## Chạy trên máy (Windows)
+1. Cài Python 3.10+ (đánh dấu Add Python to PATH).
+2. Mở CMD trong thư mục dự án và chạy:
 
-1. Cài đặt Python 3.10+ từ [python.org](https://www.python.org/) (đảm bảo tích chọn *Add Python to PATH*).
-2. Tải hoặc giải nén mã nguồn vào thư mục dự án.
-3. Mở Terminal / Command Prompt tại thư mục dự án và chạy các lệnh sau:
-
-```bash
-# Tạo môi trường ảo (tùy chọn nhưng khuyến nghị)
-python -m venv .venv
-# Kích hoạt môi trường ảo:
-# Trên Windows:
+```bat
+py -m venv .venv
 .venv\Scripts\activate
-# Trên macOS/Linux:
-source .venv/bin/activate
-
-# Nâng cấp pip và cài đặt thư viện phụ thuộc
-python -m pip install --upgrade pip
 pip install -r requirements.txt
-
-# Khởi chạy ứng dụng
 python app.py
+```
+
+3. Mở http://127.0.0.1:5000, bấm **Đăng ký** để tạo tài khoản đầu tiên.
+
+Ứng dụng tự tạo `chi_tieu.db` (dữ liệu) và `.secret_key` (khóa ký phiên đăng nhập) cạnh `app.py`. Không đưa hai file này lên GitHub.
+
+## Nâng cấp từ bản chưa có đăng nhập
+Dữ liệu cũ được giữ nguyên. **Tài khoản đầu tiên đăng ký sẽ nhận toàn bộ dữ liệu cũ**, nên hãy tự đăng ký ngay sau khi deploy (trước khi chia sẻ đường dẫn cho người khác).
+
+## Biến môi trường
+| Biến | Ý nghĩa | Mặc định |
+|---|---|---|
+| `PORT` | Cổng lắng nghe (khi có biến này, app nghe `0.0.0.0`) | 5000 |
+| `HOST` | Địa chỉ lắng nghe | `127.0.0.1` (hoặc `0.0.0.0` nếu có `PORT`) |
+| `DB_PATH` | Đường dẫn file SQLite | `chi_tieu.db` cạnh `app.py` (Docker: `/data/chi_tieu.db`) |
+| `SECRET_KEY` | Khóa ký cookie đăng nhập | tự sinh và lưu cạnh file DB |
+| `INVITE_CODE` | Nếu đặt, người đăng ký phải nhập mã này | không đặt (ai cũng đăng ký được) |
+| `COOKIE_SECURE` | Đặt `1` khi chạy sau HTTPS để cookie chỉ gửi qua HTTPS | tắt |
+| `FLASK_DEBUG` | Đặt `1` để bật debug (chỉ dùng trên máy cá nhân) | tắt |
+
+## Triển khai bằng Docker
+`Dockerfile` chạy gunicorn trên `0.0.0.0:3000` với 1 worker (phù hợp SQLite). Trên nền tảng deploy:
+- Gắn **volume vào `/data`** để giữ database và khóa phiên khi deploy lại.
+- Đặt `COOKIE_SECURE=1` nếu trang chạy qua HTTPS.
+- Nên đặt `INVITE_CODE` nếu không muốn người lạ tự đăng ký tài khoản.
+- Có thể đặt `SECRET_KEY` riêng; nếu không, khóa được tự sinh trong `/data/.secret_key`.
+
+## Kiểm thử
+```bat
+python test_app.py
+```
+Bộ test gồm 11 nhóm: danh mục, CRUD, dashboard, ngân sách, CSV, lưu bền vững, bắt buộc đăng nhập, đăng ký/đăng nhập, cách ly dữ liệu giữa người dùng, CSRF, nâng cấp từ DB cũ. Test dùng file DB riêng và không ảnh hưởng dữ liệu thật.
+
+## Bảo mật
+- Mọi truy vấn dữ liệu đều lọc theo `user_id`; người dùng không xem hoặc sửa được dữ liệu của người khác.
+- Form POST có token CSRF; cookie phiên `HttpOnly`, `SameSite=Lax`.
+- Đăng nhập sai 5 lần sẽ bị khóa tạm thời 10 phút (theo email + IP).
+- Chưa có chức năng quên mật khẩu hoặc xác thực email. Nếu mở rộng cho nhiều người dùng, nên bổ sung.
+- Sao lưu: dừng app rồi sao chép file `chi_tieu.db` (hoặc thư mục `/data` trong Docker).
