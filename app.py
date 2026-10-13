@@ -1,6 +1,5 @@
 from flask import Flask, request, redirect, url_for, flash, Response, render_template_string
 import sqlite3, csv, io
-import os
 from pathlib import Path
 from datetime import date, datetime
 
@@ -58,7 +57,7 @@ BUDGETS = r"""{% extends base %}{% block body %}<div class="row"><div><h1>Ngân 
 <div class="panel"><div class="row"><h2>Ngân sách tháng {{ month }}</h2><form method="get" style="display:flex;gap:8px"><input type="month" name="month" value="{{ month }}"><button class="btn light">Xem</button></form></div>{% if rows %}{% for b in rows %}{% set pct=b.spent/b.limit_amount*100 %}<div class="budget"><div class="row" style="margin:0"><div><b>{{ b.name }}</b><p class="muted small">{{ b.spent|money }} / {{ b.limit_amount|money }}</p></div><div class="actions"><b class="{{ 'red' if pct>=100 else ('green' if pct<80 else '') }}">{{ pct|round|int }}%</b><form method="post" action="/budgets/{{ b.id }}/delete" onsubmit="return confirm('Xóa ngân sách?')"><button class="btn danger">Xóa</button></form></div></div><div class="bar"><div class="fill {{ 'over' if pct>=100 else ('warn' if pct>=80 else '') }}" style="width:{{ [pct,100]|min }}%"></div></div><p class="small {{ 'red' if pct>=80 else 'muted' }}">{{ 'Đã vượt ngân sách' if pct>=100 else ('Đã dùng ít nhất 80% ngân sách' if pct>=80 else 'Còn lại '+((b.limit_amount-b.spent)|money)) }}</p></div>{% endfor %}{% else %}<p class="muted">Chưa có ngân sách cho tháng này.</p>{% endif %}</div>{% endblock %}"""
 
 def page(template, **kwargs):
-    return render_template_string(template, base=BASE, **kwargs)
+    return render_template_string(template, base=app.jinja_env.from_string(BASE), **kwargs)
 
 def month_arg(value):
     try: datetime.strptime(value, "%Y-%m"); return value
@@ -166,12 +165,12 @@ def export_csv():
     with db() as c: rows=c.execute(sql,params).fetchall()
     out=io.StringIO(); w=csv.writer(out); w.writerow(["Ngày","Loại","Số tiền (VND)","Danh mục","Ghi chú"])
     for r in rows: w.writerow([r["tx_date"],"Thu" if r["kind"]=="income" else "Chi",r["amount"],r["category"],r["note"]])
-    return Response("\ufeff"+out.getvalue(),mimetype="text/csv; charset=utf-8",headers={"Content-Disposition":f"attachment; filename=giao_dich_{month or 'tat_ca'}.csv"})
+    return Response("\ufeff"+out.getvalue(),content_type="text/csv; charset=utf-8",headers={"Content-Disposition":f"attachment; filename=giao_dich_{month or 'tat_ca'}.csv"})
 
 @app.route("/health")
 def health(): return {"status":"ok","database":DB.name}
 
 init_db()
 if __name__=="__main__":
-    port = int(os.environ.get("PORT", 3000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    import os
+    app.run(host=os.environ.get("HOST","127.0.0.1"),port=int(os.environ.get("PORT",5000)),debug=os.environ.get("FLASK_DEBUG")=="1")
