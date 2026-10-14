@@ -432,6 +432,55 @@ class TestChiTieuThongMinh(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_12_dashboard_balance_comparison_and_chart(self):
+        """12. Dashboard: số dư hiện tại, so sánh tháng trước, dữ liệu biểu đồ ngày/tháng/năm"""
+        import json
+        with app.db() as c:
+            cat = c.execute("SELECT id FROM categories WHERE name='Lương'").fetchone()["id"]
+        self.client.post("/transactions/new", data={"kind": "income", "amount": "4321000", "tx_date": "2026-09-15",
+                         "category_id": str(cat), "note": "Thu tháng 9"})
+
+        def chart_of(client, month):
+            html = client.get(f"/?month={month}").get_data(as_text=True)
+            m = re.search(r'<script type="application/json" id="chart-data">(.*?)</script>', html, re.S)
+            return html, json.loads(m.group(1))
+
+        html, data = chart_of(self.client, "2026-10")
+        # Số dư hiện tại tính trên mọi tháng: (15.000.000 + 4.321.000) - 9.500.000
+        self.assertIn("Số dư hiện tại", html)
+        self.assertIn("9.821.000 đ", html)
+        # Thu tháng 10 = 15.000.000, tháng 9 = 4.321.000 -> tăng 247%; chi chưa có số liệu tháng trước
+        self.assertIn("247% so với tháng trước", html)
+        self.assertIn("Chưa có số liệu tháng trước", html)
+        # Biểu đồ theo ngày / tháng / năm
+        self.assertEqual(len(data["day"]["labels"]), 31)
+        self.assertEqual(data["day"]["income"][0], 15000000)          # 01/10/2026
+        self.assertEqual(data["day"]["expense"][4], 9500000)          # 05/10/2026
+        self.assertEqual(data["month"]["income"][8], 4321000)         # tháng 9
+        self.assertEqual(data["month"]["income"][9], 15000000)        # tháng 10
+        self.assertEqual(data["month"]["expense"][9], 9500000)
+        self.assertEqual(data["year"]["labels"][-1], "2026")
+        self.assertEqual(data["year"]["income"][-1], 19321000)
+        self.assertEqual(data["year"]["expense"][-1], 9500000)
+
+        # Tháng 9: không có dữ liệu của tháng 8 nên không so sánh được
+        html9, data9 = chart_of(self.client, "2026-09")
+        self.assertIn("Chưa có số liệu tháng trước", html9)
+        self.assertEqual(len(data9["day"]["labels"]), 30)
+        self.assertEqual(data9["day"]["income"][14], 4321000)
+
+        # Giảm so với tháng trước: Tháng 11 không có dữ liệu -> thu giảm 100%
+        html11, _ = chart_of(self.client, "2026-11")
+        self.assertIn("100% so với tháng trước", html11)
+
+        # Người dùng khác không thấy số liệu của A trong biểu đồ
+        b = app.app.test_client()
+        register(b, "chart-b@example.com", "matkhau-chart-1")
+        htmlb, datab = chart_of(b, "2026-10")
+        self.assertNotIn("9.821.000", htmlb)
+        for view in ("day", "month", "year"):
+            self.assertEqual(sum(datab[view]["income"]) + sum(datab[view]["expense"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
