@@ -5,7 +5,9 @@ Website quản lý thu chi cá nhân, dùng Flask + SQLite. Có **đăng ký / �
 ## Tính năng
 - Đăng ký, đăng nhập, đăng xuất; mật khẩu được băm (không lưu dạng thô).
 - CRUD giao dịch thu/chi, danh mục mặc định.
-- Dashboard tổng thu, tổng chi, số dư theo tháng; biểu đồ chi tiêu theo danh mục.
+- Dashboard: số dư hiện tại (tính trên mọi giao dịch), tổng thu, tổng chi và số còn lại trong tháng, kèm so sánh với tháng trước.
+- Biểu đồ cột thu/chi theo ngày (trong tháng), theo tháng (trong năm) và theo năm; rê chuột hoặc chạm vào cột để xem chi tiết.
+- Biểu đồ chi tiêu theo danh mục.
 - Ngân sách theo tháng/danh mục, cảnh báo từ 80% và khi vượt hạn mức.
 - Lọc theo tháng, loại, danh mục; tìm ghi chú; xuất CSV (UTF-8 BOM, mở được bằng Excel).
 - Giao diện responsive cho máy tính/điện thoại.
@@ -50,7 +52,7 @@ Dữ liệu cũ được giữ nguyên. **Tài khoản đầu tiên đăng ký s
 ```bat
 python test_app.py
 ```
-Bộ test gồm 11 nhóm: danh mục, CRUD, dashboard, ngân sách, CSV, lưu bền vững, bắt buộc đăng nhập, đăng ký/đăng nhập, cách ly dữ liệu giữa người dùng, CSRF, nâng cấp từ DB cũ. Test dùng file DB riêng và không ảnh hưởng dữ liệu thật.
+Bộ test gồm 12 nhóm: danh mục, CRUD, dashboard, ngân sách, CSV, lưu bền vững, bắt buộc đăng nhập, đăng ký/đăng nhập, cách ly dữ liệu giữa người dùng, CSRF, nâng cấp từ DB cũ, số dư/so sánh kỳ trước/biểu đồ. Test dùng file DB riêng và không ảnh hưởng dữ liệu thật.
 
 ## Bảo mật
 - Mọi truy vấn dữ liệu đều lọc theo `user_id`; người dùng không xem hoặc sửa được dữ liệu của người khác.
