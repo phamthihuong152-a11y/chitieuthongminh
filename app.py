@@ -1,5 +1,5 @@
 from flask import Flask, request, redirect, url_for, flash, Response, render_template_string, session, g
-import os, re, hmac, time, secrets, sqlite3, csv, io
+import os, re, hmac, time, secrets, sqlite3, csv, io, calendar
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
@@ -111,7 +111,7 @@ BASE = r"""
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap" rel="stylesheet">
 <style>
-:root{--paper:#FBF4F6;--panel:#fff;--ink:#2B1621;--muted:#765F6B;--line:#EBDDE2;--soft:#F7E8EE;--brand:#D6336C;--brand-d:#A61E4D;--seg-in:#7EE2B8;--seg-out:#FFB07A;--in:#0F7B5F;--out:#C2410C;--warn:#946000;--ring:rgba(214,51,108,.28)}
+:root{--paper:#FBF4F6;--panel:#fff;--ink:#2B1621;--muted:#765F6B;--line:#EBDDE2;--soft:#F7E8EE;--brand:#D6336C;--brand-d:#A61E4D;--seg-in:#7EE2B8;--seg-out:#FFB07A;--in:#0F7B5F;--out:#C2410C;--bar-out:#E8743B;--warn:#946000;--ring:rgba(214,51,108,.28)}
 *{box-sizing:border-box}[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 "Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column}
@@ -161,10 +161,26 @@ h2{font-size:18px;margin:0;font-weight:700;letter-spacing:-.01em}
 .seg{display:block;flex-basis:0;flex-shrink:1;min-width:0;transform-origin:left;animation:grow .9s cubic-bezier(.2,.8,.2,1) both}
 .seg+.seg{margin-left:3px}.seg.in{background:var(--seg-in)}.seg.out{background:var(--seg-out)}.seg.none{background:transparent}
 @keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-.hero-foot{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:18px;margin-top:18px;align-items:end}
-.hero-foot .k{display:flex;align-items:center;gap:8px;color:#F9D3E2;font-size:13px}.hero-foot b{display:block;font-size:22px;font-weight:700;letter-spacing:-.01em}
-.sw{width:10px;height:10px;border-radius:3px;display:inline-block}.sw.in{background:var(--seg-in)}.sw.out{background:var(--seg-out)}
-.hero-foot .note{color:#F9D3E2;font-size:14px;text-align:right}
+.hero-foot{display:flex;justify-content:space-between;align-items:center;gap:8px 18px;flex-wrap:wrap;margin-top:14px;color:#F9D3E2;font-size:13px}.hero-foot .lg2{display:flex;gap:16px;flex-wrap:wrap}.hero-foot .lg2 span{display:inline-flex;align-items:center;gap:8px}
+.sw{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}.sw.in{background:var(--seg-in)}.sw.out{background:var(--seg-out)}.sw.bi{background:var(--in)}.sw.be{background:var(--bar-out)}
+.hero-foot .note{font-size:14px}
+/* thẻ số liệu và biểu đồ */
+.kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-bottom:18px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;min-width:0}
+.kpi-h{display:flex;align-items:center;gap:8px;color:var(--muted);font-weight:500;font-size:14px}
+.kpi-v{display:block;font-size:30px;line-height:1.15;font-weight:700;letter-spacing:-.02em;margin:8px 0 6px;overflow-wrap:anywhere}
+.delta{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600}.delta svg{width:11px;height:11px;fill:currentColor;flex:none}.delta svg.down{transform:rotate(180deg)}
+.delta.good{color:var(--in)}.delta.bad{color:var(--out)}.delta.flat{color:var(--muted);font-weight:500}
+.tabs2{display:inline-flex;background:var(--soft);border-radius:10px;padding:3px;gap:2px}
+.tabs2 button{border:0;background:transparent;padding:6px 16px;border-radius:8px;font:600 13px "Be Vietnam Pro",system-ui,sans-serif;color:var(--muted);cursor:pointer}
+.tabs2 button[aria-pressed=true]{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(43,22,33,.14)}
+.chart-top{display:flex;justify-content:space-between;align-items:center;gap:8px 18px;flex-wrap:wrap;margin-bottom:8px;font-size:13px;color:var(--muted)}
+.lg{display:flex;gap:16px}.lg span{display:inline-flex;align-items:center;gap:8px}.chart-sum{display:flex;gap:16px;flex-wrap:wrap}.chart-sum b{font-weight:700}.chart-sum .in{color:var(--in)}.chart-sum .out{color:var(--out)}
+.chart-wrap{position:relative}.chart{min-height:240px}.chart svg{display:block;max-width:100%;touch-action:pan-y}
+.chart .gl{stroke:var(--line);stroke-width:1}.chart .ax{fill:var(--muted);font-size:11px;font-family:"Be Vietnam Pro",system-ui,sans-serif}
+.chart .bi{fill:var(--in)}.chart .be{fill:var(--bar-out)}.chart .hit{fill:transparent;cursor:crosshair}.chart .hit:hover,.chart .hit.on{fill:rgba(214,51,108,.07)}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:#fff;border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.55;white-space:nowrap;transform:translate(-50%,-100%);z-index:5}
+.tip b{display:block;margin-bottom:2px}.tip i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
 /* danh mục & ngân sách */
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
 .cats{list-style:none;margin:0;padding:0}.cats li{margin:0 0 16px}.cats li:last-child{margin:0}
@@ -217,7 +233,8 @@ input:focus,select:focus,textarea:focus{outline:3px solid var(--ring);border-col
 .auth-form{padding:38px 34px;display:flex;flex-direction:column;justify-content:center}.auth-form h2{font-size:24px;margin-bottom:4px}
 footer{text-align:center;color:#8E7A84;font-size:12px;padding:6px 20px 24px}
 .tabbar{display:none}
-@media(max-width:900px){.cols,.budget-layout{grid-template-columns:1fr}.filters{grid-template-columns:1fr 1fr}.hero-foot{grid-template-columns:1fr 1fr}.hero-foot .note{grid-column:1/-1;text-align:left}}
+@media(max-width:900px){.cols,.budget-layout{grid-template-columns:1fr}.filters{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.kpis{grid-template-columns:1fr;gap:12px}.kpi{padding:16px 18px}.kpi-v{font-size:26px}}
 @media(max-width:760px){
  .links,.top .btn:not(.light),.who-email{display:none}
  .top-in{padding:10px 16px}.wrap{padding:20px 14px 100px}h1{font-size:27px}
@@ -230,7 +247,7 @@ footer{text-align:center;color:#8E7A84;font-size:12px;padding:6px 20px 24px}
  .tx{grid-template-columns:42px 1fr auto}.tx .actions{grid-column:2/-1}
  .month input{max-width:150px}
 }
-@media(max-width:440px){.brand{font-size:16px;gap:8px}.filters,.two{grid-template-columns:1fr}.cat-row b{min-width:0}.hero-foot b{font-size:19px}}
+@media(max-width:440px){.brand{font-size:16px;gap:8px}.filters,.two{grid-template-columns:1fr}.cat-row b{min-width:0}}
 @media(prefers-reduced-motion:reduce){.seg{animation:none}}
 </style></head><body>
 {% set p=request.path %}
@@ -251,11 +268,24 @@ DASH = r"""{% extends base %}{% block body %}
 <div class="head"><div><h1>Chi tiêu của bạn</h1><p class="muted" style="margin:0">Tiền vào, tiền ra và ngân sách trong tháng.</p></div>
 <div class="month"><a href="/?month={{ prev_month }}" aria-label="Tháng trước"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><form method="get"><input type="month" name="month" value="{{ month }}" onchange="this.form.submit()" aria-label="Chọn tháng"><noscript><button class="btn sm">Xem</button></noscript></form><a href="/?month={{ next_month }}" aria-label="Tháng sau"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></a></div></div>
 <section class="hero" aria-labelledby="bal-label">
-<div class="hero-top"><span id="bal-label">Số dư ròng</span><span class="pill">Tháng {{ month|vmonth }}</span></div>
-<div class="big num{{ ' neg' if bal<0 }}">{{ bal|money }}</div>
-<div class="split" role="img" aria-label="Tỷ lệ tổng thu so với tổng chi">{% if income+expense>0 %}{% if income>0 %}<i class="seg in" style="flex-grow:{{ income }}"></i>{% endif %}{% if expense>0 %}<i class="seg out" style="flex-grow:{{ expense }}"></i>{% endif %}{% else %}<i class="seg none" style="flex-grow:1"></i>{% endif %}</div>
-<div class="hero-foot"><div><span class="k"><i class="sw in"></i>Tổng thu</span><b class="num">{{ income|money }}</b></div><div><span class="k"><i class="sw out"></i>Tổng chi</span><b class="num">{{ expense|money }}</b></div>
+<div class="hero-top"><span id="bal-label">Số dư hiện tại</span><span class="pill">Tất cả giao dịch</span></div>
+<div class="big num{{ ' neg' if balance<0 }}">{{ balance|money }}</div>
+<div class="split" role="img" aria-label="Tỷ lệ thu so với chi trong tháng">{% if income+expense>0 %}{% if income>0 %}<i class="seg in" style="flex-grow:{{ income }}"></i>{% endif %}{% if expense>0 %}<i class="seg out" style="flex-grow:{{ expense }}"></i>{% endif %}{% else %}<i class="seg none" style="flex-grow:1"></i>{% endif %}</div>
+<div class="hero-foot"><div class="lg2"><span><i class="sw in"></i>Thu tháng {{ month|vmonth }}</span><span><i class="sw out"></i>Chi</span></div>
 <div class="note">{% if income>0 %}{% if bal>=0 %}Giữ lại {{ ((income-expense)/income*100)|round|int }}% thu nhập trong tháng{% else %}Chi vượt thu {{ (expense-income)|money }}{% endif %}{% else %}Chưa có khoản thu nào trong tháng{% endif %}</div></div></section>
+{% macro dl(d) %}<div class="delta {{ d.tone }}">{% if d.dir in ('up','down') %}<svg class="{{ d.dir }}" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2l4.5 7h-9z"/></svg><span class="sr">{{ 'Tăng' if d.dir=='up' else 'Giảm' }}</span>{% endif %}<span>{{ d.text }}</span></div>{% endmacro %}
+<div class="kpis">
+<article class="kpi"><div class="kpi-h"><i class="sw bi"></i>Tổng thu trong tháng</div><b class="num kpi-v">{{ income|money }}</b>{{ dl(d_income) }}</article>
+<article class="kpi"><div class="kpi-h"><i class="sw be"></i>Tổng chi trong tháng</div><b class="num kpi-v">{{ expense|money }}</b>{{ dl(d_expense) }}</article>
+<article class="kpi"><div class="kpi-h"><i class="sw" style="background:var(--brand)"></i>Còn lại trong tháng</div><b class="num kpi-v">{{ bal|money }}</b>{{ dl(d_net) }}</article>
+</div>
+<section class="panel" aria-labelledby="ch-title">
+<div class="panel-h"><div><h2 id="ch-title">Thu chi theo thời gian</h2><div class="muted small" id="chart-period"></div></div>
+<div class="tabs2" role="group" aria-label="Chọn khoảng thời gian"><button type="button" data-mode="day" aria-pressed="true">Ngày</button><button type="button" data-mode="month" aria-pressed="false">Tháng</button><button type="button" data-mode="year" aria-pressed="false">Năm</button></div></div>
+<div class="chart-top"><div class="lg"><span><i class="sw bi"></i>Thu</span><span><i class="sw be"></i>Chi</span></div><div class="chart-sum"><span>Thu <b class="num in" id="cs-in"></b></span><span>Chi <b class="num out" id="cs-out"></b></span></div></div>
+<div class="chart-wrap"><div class="chart" id="chart"></div><div class="tip" id="chart-tip" hidden></div></div>
+<script type="application/json" id="chart-data">{{ chart|tojson }}</script>
+</section>
 <div class="cols">
 <section class="panel"><div class="panel-h"><h2>Chi tiêu theo danh mục</h2></div>
 {% if bycat %}<ul class="cats">{% for x in bycat %}<li><div class="cat-row"><span class="dot" style="background:{{ cat_color(x.id) }}"></span><span class="cat-name">{{ x.name }}</span><span class="cat-share">{{ (x.total/expense*100)|round|int }}%</span><b class="num">{{ x.total|money }}</b></div><div class="bar"><div class="fill" style="width:{{ (x.total/maxcat*100)|round }}%;background:{{ cat_color(x.id) }}"></div></div></li>{% endfor %}</ul>
@@ -265,7 +295,47 @@ DASH = r"""{% extends base %}{% block body %}
 {% else %}<div class="empty">Chưa đặt ngân sách cho tháng này.<br><a class="btn light" href="/budgets?month={{ month }}">Đặt ngân sách</a></div>{% endif %}</section></div>
 <section class="panel" style="margin-top:18px"><div class="panel-h"><h2>Giao dịch gần đây</h2><a class="link" href="/transactions?month={{ month }}">Xem tất cả</a></div>
 {% if recent %}<ul class="txs">{% for t in recent %}<li class="tx"><span class="ico" style="--c:{{ cat_color(t.category_id) }}" aria-hidden="true">{{ t.category|first|upper }}</span><div class="tx-main"><b>{{ t.note or t.category }}</b><div class="tx-meta"><span>{{ t.category }}</span><span>{{ t.tx_date|vdate }}</span></div></div><span class="tx-amt {{ 'in' if t.kind=='income' else 'out' }}">{{ '+' if t.kind=='income' else '−' }}{{ t.amount|money }}</span><div class="actions"><a class="link" href="/transactions/{{ t.id }}/edit">Sửa</a></div></li>{% endfor %}</ul>
-{% else %}<div class="empty">Chưa có giao dịch nào.<br><a class="btn" href="/transactions/new">Thêm giao dịch đầu tiên</a></div>{% endif %}</section>{% endblock %}"""
+{% else %}<div class="empty">Chưa có giao dịch nào.<br><a class="btn" href="/transactions/new">Thêm giao dịch đầu tiên</a></div>{% endif %}</section><script>(function(){
+var data=JSON.parse(document.getElementById('chart-data').textContent),box=document.getElementById('chart'),tip=document.getElementById('chart-tip'),mode='day',layout=null,lh=280;
+function vnd(v){return Number(v).toLocaleString('vi-VN')+' đ'}
+function short(v){if(v>=1e9)return String(+(v/1e9).toFixed(1)).replace('.',',')+' tỷ';if(v>=1e6)return String(+(v/1e6).toFixed(1)).replace('.',',')+' tr';if(v>=1e3)return Math.round(v/1e3)+'k';return String(Math.round(v))}
+function nice(m){var raw=m/4,p=Math.pow(10,Math.floor(Math.log(raw)/Math.LN10)),n=raw/p,c=[1,1.5,2,2.5,3,4,5,6,8,10];for(var i=0;i<c.length;i++){if(n<=c[i]+1e-9)return c[i]*p*4}return 40*p}
+function sum(a){return a.reduce(function(x,y){return x+y},0)}
+function draw(){
+ var d=data[mode],n=d.labels.length,w=box.clientWidth||320,h=w<520?220:280;lh=h;var pl=46,pr=8,pt=10,pb=26,pw=w-pl-pr,ph=h-pt-pb;
+ document.getElementById('chart-period').textContent=d.period;
+ document.getElementById('cs-in').textContent=vnd(sum(d.income));document.getElementById('cs-out').textContent=vnd(sum(d.expense));
+ tip.hidden=true;
+ var mx=Math.max.apply(null,d.income.concat(d.expense));
+ if(!(mx>0)){box.innerHTML='<div class="empty">Chưa có dữ liệu cho khoảng thời gian này.</div>';layout=null;return}
+ var top=nice(mx),g=pw/n,bw=Math.max(3,Math.min(20,g*0.36)),s='<svg width="'+w+'" height="'+h+'" role="img" aria-label="Biểu đồ cột so sánh thu và chi">';
+ layout=[];
+ for(var i=0;i<=4;i++){var y=pt+ph-ph*i/4;s+='<line class="gl" x1="'+pl+'" x2="'+(w-pr)+'" y1="'+y+'" y2="'+y+'"/><text class="ax" x="'+(pl-8)+'" y="'+(y+4)+'" text-anchor="end">'+short(top*i/4)+'</text>'}
+ for(var k=0;k<n;k++){
+  var cx=pl+g*k+g/2,hi=d.income[k]>0?Math.max(2,ph*d.income[k]/top):0,he=d.expense[k]>0?Math.max(2,ph*d.expense[k]/top):0;
+  layout.push({cx:cx,y:pt+ph-Math.max(hi,he)});
+  s+='<rect class="hit" data-i="'+k+'" x="'+(pl+g*k)+'" y="'+pt+'" width="'+g+'" height="'+ph+'"/>';
+  if(hi)s+='<rect class="bi" x="'+(cx-bw-1)+'" y="'+(pt+ph-hi)+'" width="'+bw+'" height="'+hi+'" rx="2.5" pointer-events="none"/>';
+  if(he)s+='<rect class="be" x="'+(cx+1)+'" y="'+(pt+ph-he)+'" width="'+bw+'" height="'+he+'" rx="2.5" pointer-events="none"/>';
+  if(n<=16||k===0||(k+1)%5===0)s+='<text class="ax" x="'+cx+'" y="'+(h-8)+'" text-anchor="middle">'+d.labels[k]+'</text>';
+ }
+ box.innerHTML=s+'</svg>';
+}
+function show(e){
+ var t=e.target;if(!t.classList||!t.classList.contains('hit')||!layout)return;
+ var i=+t.getAttribute('data-i'),d=data[mode],p=layout[i],w=box.clientWidth;
+ [].forEach.call(box.querySelectorAll('.hit.on'),function(x){x.classList.remove('on')});t.classList.add('on');
+ tip.innerHTML='<b>'+d.tips[i]+'</b><i style="background:#7EE2B8"></i>Thu '+vnd(d.income[i])+'<br><i style="background:#FFB07A"></i>Chi '+vnd(d.expense[i]);
+ tip.hidden=false;tip.style.left=Math.min(Math.max(p.cx,80),w-80)+'px';tip.style.top=Math.max(Math.min(p.y-8,lh*0.62),60)+'px';
+}
+function hide(e){tip.hidden=true;[].forEach.call(box.querySelectorAll('.hit.on'),function(x){x.classList.remove('on')})}
+box.addEventListener('pointermove',show);box.addEventListener('pointerdown',show);
+box.addEventListener('pointerleave',function(e){if(e.pointerType==='mouse')hide()});
+document.addEventListener('pointerdown',function(e){if(!box.contains(e.target))hide()});
+[].forEach.call(document.querySelectorAll('.tabs2 button'),function(b){b.addEventListener('click',function(){mode=b.getAttribute('data-mode');[].forEach.call(document.querySelectorAll('.tabs2 button'),function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});draw()})});
+if(window.ResizeObserver){new ResizeObserver(draw).observe(box)}else{window.addEventListener('resize',draw)}
+draw();
+})();</script>{% endblock %}"""
 
 LIST = r"""{% extends base %}{% block body %}
 {% set ti=rows|selectattr('kind','equalto','income')|map(attribute='amount')|sum %}{% set to=rows|selectattr('kind','equalto','expense')|map(attribute='amount')|sum %}
@@ -329,6 +399,44 @@ def month_arg(value):
 
 def categories():
     with db() as c: return c.execute("SELECT * FROM categories ORDER BY kind,id").fetchall()
+
+def delta(cur, prev, up_is_good):
+    """So sánh với kỳ trước: trả về hướng mũi tên, sắc thái (tốt/xấu/trung tính) và câu mô tả."""
+    if cur == 0 and prev == 0:
+        return {"dir": "none", "tone": "flat", "text": "Không có số liệu"}
+    if prev == 0:
+        return {"dir": "none", "tone": "flat", "text": "Chưa có số liệu tháng trước"}
+    pct = round((cur - prev) / abs(prev) * 100)
+    if pct == 0:
+        return {"dir": "none", "tone": "flat", "text": "Không đổi so với tháng trước"}
+    up = pct > 0
+    return {"dir": "up" if up else "down", "tone": "good" if up == up_is_good else "bad",
+            "text": f"{abs(pct)}% so với tháng trước"}
+
+def chart_data(c, u, month):
+    """Số liệu thu/chi theo ngày (trong tháng), theo tháng (trong năm) và theo năm cho biểu đồ."""
+    year, mon = int(month[:4]), int(month[5:7])
+    ndays = calendar.monthrange(year, mon)[1]
+    def put(rows, key, inc, exp, offset):
+        for r in rows:
+            i = r[key] - offset
+            if 0 <= i < len(inc):
+                (inc if r["kind"] == "income" else exp)[i] = r["s"]
+    d_inc, d_exp = [0]*ndays, [0]*ndays
+    put(c.execute("SELECT CAST(substr(tx_date,9,2) AS INTEGER) k,kind,SUM(amount) s FROM transactions WHERE user_id=? AND substr(tx_date,1,7)=? GROUP BY k,kind", (u, month)).fetchall(), "k", d_inc, d_exp, 1)
+    m_inc, m_exp = [0]*12, [0]*12
+    put(c.execute("SELECT CAST(substr(tx_date,6,2) AS INTEGER) k,kind,SUM(amount) s FROM transactions WHERE user_id=? AND substr(tx_date,1,4)=? GROUP BY k,kind", (u, str(year))).fetchall(), "k", m_inc, m_exp, 1)
+    yrows = c.execute("SELECT CAST(substr(tx_date,1,4) AS INTEGER) k,kind,SUM(amount) s FROM transactions WHERE user_id=? GROUP BY k,kind", (u,)).fetchall()
+    years = sorted({r["k"] for r in yrows} | {year})[-8:]
+    y_inc, y_exp = [0]*len(years), [0]*len(years)
+    for r in yrows:
+        if r["k"] in years:
+            (y_inc if r["kind"] == "income" else y_exp)[years.index(r["k"])] = r["s"]
+    return {
+        "day":   {"period": f"Tháng {mon:02d}/{year}", "labels": [str(i) for i in range(1, ndays+1)], "tips": [f"Ngày {i:02d}/{mon:02d}/{year}" for i in range(1, ndays+1)], "income": d_inc, "expense": d_exp},
+        "month": {"period": f"Năm {year}", "labels": [f"T{i}" for i in range(1, 13)], "tips": [f"Tháng {i:02d}/{year}" for i in range(1, 13)], "income": m_inc, "expense": m_exp},
+        "year":  {"period": "Các năm có dữ liệu", "labels": [str(y) for y in years], "tips": [f"Năm {y}" for y in years], "income": y_inc, "expense": y_exp},
+    }
 
 # ---------------------------------------------------------------- Xác thực & CSRF
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -467,7 +575,15 @@ def dashboard():
         bycat=c.execute("SELECT ca.id,ca.name,SUM(t.amount) total FROM transactions t JOIN categories ca ON ca.id=t.category_id WHERE t.user_id=? AND t.kind='expense' AND substr(t.tx_date,1,7)=? GROUP BY ca.id ORDER BY total DESC",(u,month)).fetchall()
         recent=c.execute("SELECT t.*,ca.name category FROM transactions t JOIN categories ca ON ca.id=t.category_id WHERE t.user_id=? AND substr(t.tx_date,1,7)=? ORDER BY tx_date DESC,t.id DESC LIMIT 8",(u,month)).fetchall()
         budgets=c.execute("""SELECT b.*,ca.name,COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.user_id=b.user_id AND t.category_id=b.category_id AND t.kind='expense' AND substr(t.tx_date,1,7)=b.month),0) spent FROM budgets b JOIN categories ca ON ca.id=b.category_id WHERE b.user_id=? AND b.month=?""",(u,month)).fetchall()
-    return page(DASH, title="Tổng quan",month=month,income=totals["income"],expense=totals["expense"],bycat=bycat,maxcat=max([x["total"] for x in bycat],default=1),recent=recent,budgets=budgets,prev_month=shift_month(month,-1),next_month=shift_month(month,1))
+    prev = shift_month(month, -1)
+    with db() as c:
+        balance = c.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE -amount END),0) FROM transactions WHERE user_id=?", (u,)).fetchone()[0]
+        p = c.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE 0 END),0) i, COALESCE(SUM(CASE WHEN kind='expense' THEN amount ELSE 0 END),0) e FROM transactions WHERE user_id=? AND substr(tx_date,1,7)=?", (u, prev)).fetchone()
+        chart = chart_data(c, u, month)
+    d_income = delta(totals["income"], p["i"], True)
+    d_expense = delta(totals["expense"], p["e"], False)
+    d_net = delta(totals["income"] - totals["expense"], p["i"] - p["e"], True)
+    return page(DASH, title="Tổng quan", balance=balance, d_income=d_income, d_expense=d_expense, d_net=d_net, chart=chart,month=month,income=totals["income"],expense=totals["expense"],bycat=bycat,maxcat=max([x["total"] for x in bycat],default=1),recent=recent,budgets=budgets,prev_month=shift_month(month,-1),next_month=shift_month(month,1))
 
 @app.route("/transactions")
 @login_required
