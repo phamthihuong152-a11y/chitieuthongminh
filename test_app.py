@@ -481,6 +481,198 @@ class TestChiTieuThongMinh(unittest.TestCase):
         for view in ("day", "month", "year"):
             self.assertEqual(sum(datab[view]["income"]) + sum(datab[view]["expense"]), 0)
 
+    def test_13_transactions_search_filter_sort_pagination(self):
+        """13. Giao dịch: tìm kiếm, lọc ngày/danh mục/loại, sắp xếp, phân trang, CSV theo bộ lọc, quay về đúng trang"""
+        c = app.app.test_client()
+        register(c, "paging@example.com", "matkhau-paging-1")
+        with app.db() as conn:
+            cat = {r["name"]: r["id"] for r in conn.execute("SELECT id,name FROM categories")}
+
+        def add(kind, amount, d, category, note):
+            c.post("/transactions/new", data={"kind": kind, "amount": str(amount), "tx_date": d,
+                                              "category_id": str(cat[category]), "note": note})
+        for i in range(1, 46):   # 45 khoản chi từ 01/2027
+            add("expense", i * 10000, f"2027-01-{(i % 28) + 1:02d}", "Ăn uống" if i % 2 else "Đi lại", f"GD {i:02d}")
+        add("income", 20000000, "2027-01-05", "Lương", "Lương T1")
+        add("expense", 99000, "2027-02-10", "Ăn uống", "ĂN TỐI NHÀ HÀNG")
+        add("expense", 55000, "2027-02-11", "Mua sắm", "giảm 50% áo")
+        add("expense", 77000, "2027-02-12", "Mua sắm", "khuyến mãi 50 nghìn")
+        total = 49   # 45 + 1 khoản thu + 3 khoản chi
+
+        def get(url):
+            return c.get(url).get_data(as_text=True)
+
+        def order(html, notes):
+            pos = [html.index(n) for n in notes]
+            return pos == sorted(pos)
+
+        # Phân trang: 20 khoản mỗi trang, giữ bộ lọc trên liên kết trang
+        p1 = get("/transactions")
+        self.assertIn(f"{total} giao dịch", p1)
+        self.assertEqual(p1.count('class="tx"'), 20)
+        self.assertIn("đang xem 1 đến 20", p1)
+        self.assertIn('aria-label="Phân trang"', p1)
+        self.assertEqual(get("/transactions?page=3").count('class="tx"'), total - 40)
+        self.assertEqual(get("/transactions?page=999").count('class="tx"'), total - 40)   # trang quá lớn -> trang cuối
+        self.assertEqual(get("/transactions?page=abc").count('class="tx"'), 20)           # sai định dạng -> trang 1
+        pk = get("/transactions?kind=expense&sort=amount_asc")
+        self.assertIn("kind=expense", re.search(r'href="([^"]*page=2[^"]*)"', pk).group(1))
+        self.assertIn("sort=amount_asc", re.search(r'href="([^"]*page=2[^"]*)"', pk).group(1))
+
+        # Tổng thu/chi tính trên TOÀN BỘ kết quả lọc, không chỉ trang hiện tại
+        all_expense = sum(i * 10000 for i in range(1, 46)) + 99000 + 55000 + 77000
+        self.assertIn("Chi −" + app.money(all_expense), p1)
+        self.assertIn("Thu +" + app.money(20000000), p1)
+
+        # Lọc khoảng ngày + tham số cũ ?month=
+        jan = get("/transactions?date_from=2027-01-01&date_to=2027-01-31")
+        feb = get("/transactions?month=2027-02")
+        self.assertIn("46 giao dịch", jan)
+        self.assertIn("3 giao dịch", feb)
+        self.assertIn("Từ 01/02/2027", feb)
+        self.assertIn("Đến 28/02/2027", feb)
+        self.assertEqual(get("/transactions?date_from=2027-02-12&date_to=2027-02-10").count('class="tx"'), 3)  # ngày đảo ngược tự đổi chỗ
+        self.assertIn(f"{total} giao dịch", get("/transactions?date_from=khong-hop-le&date_to=2027-99-99"))   # ngày sai bị bỏ qua
+
+        # Lọc loại / danh mục
+        self.assertIn("1 giao dịch", get("/transactions?kind=income"))
+        self.assertIn(f"{total - 1} giao dịch", get("/transactions?kind=expense"))
+        self.assertIn("2 giao dịch", get(f"/transactions?category_id={cat['Mua sắm']}"))
+        self.assertIn("Danh mục: Mua sắm", get(f"/transactions?category_id={cat['Mua sắm']}"))
+
+        # Tìm kiếm không phân biệt hoa thường tiếng Việt, tìm theo cả tên danh mục
+        self.assertIn("ĂN TỐI NHÀ HÀNG", get("/transactions?q=ăn+tối"))
+        self.assertIn("ĂN TỐI NHÀ HÀNG", get("/transactions?q=" + "ĂN TỐI"))
+        self.assertIn("Lương T1", get("/transactions?q=lương"))          # khớp tên danh mục
+        # Ký tự đặc biệt của LIKE được coi là chữ thường: "50%" chỉ khớp ghi chú có dấu %
+        pct = get("/transactions?q=50%25")
+        self.assertIn("giảm 50% áo", pct)
+        self.assertNotIn("khuyến mãi 50 nghìn", pct)
+        self.assertIn("1 giao dịch", get("/transactions?q=%25"))
+        self.assertIn("0 giao dịch", get("/transactions?q=zzzkhongco"))
+        self.assertIn("Không có giao dịch nào khớp bộ lọc", get("/transactions?q=zzzkhongco"))
+
+        # Sắp xếp
+        self.assertTrue(order(get("/transactions?kind=expense&sort=amount_desc"), ["GD 45", "GD 44", "GD 43"]))
+        self.assertTrue(order(get("/transactions?kind=expense&sort=amount_asc"), ["GD 01", "GD 02", "GD 03"]))
+        self.assertTrue(order(get("/transactions?sort=date_asc&date_from=2027-01-01&date_to=2027-01-31&q=GD"), ["GD 28", "GD 01", "GD 29", "GD 02"]))
+        self.assertIn(f"{total} giao dịch", get("/transactions?sort=khong-hop-le"))   # sort sai -> mặc định
+
+        # Xuất CSV: theo bộ lọc nhưng lấy toàn bộ kết quả (không bị cắt theo trang)
+        csv_text = c.get("/export.csv?kind=expense&q=GD").data.decode("utf-8-sig")
+        self.assertEqual(csv_text.count("GD "), 45)
+        self.assertNotIn("Lương T1", csv_text)
+        self.assertEqual(c.get("/export.csv").data.decode("utf-8-sig").count("\n") - 1, total)
+        self.assertIn("giao_dich_2027-02-01_2027-02-28.csv", c.get("/export.csv?month=2027-02").headers["Content-Disposition"])
+        # Chống công thức độc hại trong Excel
+        add("expense", 1000, "2027-03-01", "Chi phí khác", "=HYPERLINK(\"http://x\")")
+        self.assertIn("'=HYPERLINK", c.get("/export.csv?q=hyperlink").data.decode("utf-8-sig"))
+
+        # Sau khi xóa/sửa: quay về đúng trang đang lọc, và chặn chuyển hướng ra ngoài
+        with app.db() as conn:
+            tid = conn.execute("SELECT id FROM transactions WHERE note='GD 01'").fetchone()["id"]
+        back = "/transactions?kind=expense&sort=amount_asc&page=2"
+        edit = c.post(f"/transactions/{tid}/edit?next=" + back.replace("&", "%26").replace("?", "%3F").replace("=", "%3D"),
+                      data={"kind": "expense", "amount": "10000", "tx_date": "2027-01-02",
+                            "category_id": str(cat["Ăn uống"]), "note": "GD 01"})
+        self.assertEqual(edit.status_code, 302)
+        self.assertEqual(edit.headers["Location"], back)
+        evil = c.post(f"/transactions/{tid}/edit?next=//evil.com", data={"kind": "expense", "amount": "10000",
+                      "tx_date": "2027-01-02", "category_id": str(cat["Ăn uống"]), "note": "GD 01"})
+        self.assertEqual(evil.headers["Location"], "/transactions")
+        dele = c.post(f"/transactions/{tid}/delete", data={"next": back})
+        self.assertEqual(dele.headers["Location"], back)
+        evil2 = c.post("/transactions/999999/delete", data={"next": "https://evil.com"})
+        self.assertEqual(evil2.headers["Location"], "/transactions")
+
+    def test_14_budget_summary_alerts_edit_copy(self):
+        """14. Ngân sách: tổng quan, danh mục vượt kế hoạch, cảnh báo 80%/100% khi nhập chi, sửa, sao chép tháng trước"""
+        c = app.app.test_client()
+        register(c, "budget@example.com", "matkhau-budget-1")
+        with app.db() as conn:
+            cat = {r["name"]: r["id"] for r in conn.execute("SELECT id,name FROM categories")}
+        M = "2028-03"
+
+        def set_budget(name, limit, month=M):
+            return c.post("/budgets", data={"month": month, "category_id": str(cat[name]), "limit_amount": str(limit)}, follow_redirects=True)
+
+        def spend(name, amount, d="2028-03-10", kind="expense"):
+            return c.post("/transactions/new", data={"kind": kind, "amount": str(amount), "tx_date": d,
+                          "category_id": str(cat[name]), "note": "test"}, follow_redirects=True).get_data(as_text=True)
+
+        set_budget("Ăn uống", 1000000); set_budget("Mua sắm", 500000); set_budget("Đi lại", 400000); set_budget("Giải trí", 2000000)
+
+        # Cảnh báo ngay khi lưu khoản chi
+        w80 = spend("Ăn uống", 850000)
+        self.assertIn("Cảnh báo: Ăn uống đã dùng 85% ngân sách tháng 03/2028", w80)
+        wover = spend("Mua sắm", 650000)
+        self.assertIn("Cảnh báo: Mua sắm đã vượt ngân sách tháng 03/2028 là 150.000 đ", wover)
+        w100 = spend("Đi lại", 400000)
+        self.assertIn("Cảnh báo: Đi lại đã dùng hết ngân sách tháng 03/2028", w100)
+        self.assertNotIn("Cảnh báo", spend("Giải trí", 100000))                  # 5%: không cảnh báo
+        self.assertNotIn("Cảnh báo", spend("Lương", 5000000, kind="income"))      # khoản thu: không cảnh báo
+        self.assertNotIn("Cảnh báo", spend("Ăn uống", 100000, d="2028-04-02"))   # tháng khác, chưa đặt ngân sách
+
+        html = c.get(f"/budgets?month={M}").get_data(as_text=True)
+        # Tổng quan: hạn mức 3.900.000, đã chi 2.000.000, còn lại 1.900.000, 51%
+        self.assertIn("3.900.000 đ", html)
+        self.assertIn("2.000.000 đ", html)
+        self.assertIn("Còn lại <b class=\"num\">1.900.000 đ", html)
+        self.assertIn(">51%<", html)
+        # Danh mục vượt kế hoạch và danh mục từ 80%
+        self.assertIn("vượt kế hoạch 150.000 đ (130%)", html)
+        self.assertIn("đã dùng hết ngân sách (100%)", html)
+        self.assertIn("đã dùng 85%, còn 150.000 đ", html)
+        self.assertEqual(html.count('class="al over"'), 2)
+        self.assertEqual(html.count('class="al warn"'), 1)
+        self.assertIn("Đã vượt ngân sách", html)
+        self.assertIn("Vượt 150.000 đ", html)
+        # Sắp xếp: danh mục dùng nhiều nhất lên đầu
+        self.assertLess(html.index("130%"), html.index("85%"))
+
+        # Dashboard: thanh cảnh báo
+        dash = c.get(f"/?month={M}").get_data(as_text=True)
+        self.assertIn("2 danh mục vượt ngân sách:</b> Mua sắm, Đi lại.", dash)
+        self.assertIn("1 danh mục đã dùng từ 80%:</b> Ăn uống.", dash)
+
+        # Sửa ngân sách (chỉ đổi hạn mức, danh mục và tháng được giữ nguyên)
+        with app.db() as conn:
+            bid = conn.execute("SELECT id FROM budgets WHERE month=? AND category_id=? AND user_id=(SELECT id FROM users WHERE email='budget@example.com')", (M, cat["Mua sắm"])).fetchone()["id"]
+        edit_html = c.get(f"/budgets?month={M}&edit={bid}").get_data(as_text=True)
+        self.assertIn("Sửa ngân sách", edit_html)
+        self.assertIn('value="500000"', edit_html)
+        self.assertIn("Cập nhật ngân sách", edit_html)
+        c.post(f"/budgets?month={M}&edit={bid}", data={"month": M, "category_id": str(cat["Mua sắm"]), "limit_amount": "1.000.000"})
+        with app.db() as conn:
+            self.assertEqual(conn.execute("SELECT limit_amount FROM budgets WHERE id=?", (bid,)).fetchone()["limit_amount"], 1000000)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM budgets WHERE month=? AND category_id=?", (M, cat["Mua sắm"])).fetchone()[0], 1)
+        self.assertEqual(c.get(f"/budgets?month={M}").get_data(as_text=True).count('class="al over"'), 1)   # Mua sắm hết vượt
+
+        # Người dùng khác không sửa được ngân sách của mình
+        other = app.app.test_client()
+        register(other, "budget-other@example.com", "matkhau-other-1")
+        self.assertNotIn("Sửa ngân sách", other.get(f"/budgets?month={M}&edit={bid}").get_data(as_text=True))
+
+        # Sao chép từ tháng trước
+        nxt = "2028-04"
+        r0 = c.post("/budgets/copy", data={"month": "2028-02"}, follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Tháng 01/2028 chưa có ngân sách nào để sao chép", r0)
+        r1 = c.post("/budgets/copy", data={"month": nxt}, follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Đã sao chép 4 ngân sách từ tháng 03/2028", r1)
+        with app.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM budgets WHERE month=? AND user_id=(SELECT id FROM users WHERE email='budget@example.com')", (nxt,)).fetchone()[0], 4)
+        r2 = c.post("/budgets/copy", data={"month": nxt}, follow_redirects=True).get_data(as_text=True)
+        self.assertIn("đã có đủ ở tháng này", r2)
+        # Ngân sách đã chỉnh tay ở tháng mới không bị ghi đè khi sao chép lại
+        set_budget("Ăn uống", 1234000, month=nxt)
+        c.post("/budgets/copy", data={"month": nxt})
+        with app.db() as conn:
+            self.assertEqual(conn.execute("SELECT limit_amount FROM budgets WHERE month=? AND category_id=? AND user_id=(SELECT id FROM users WHERE email='budget@example.com')", (nxt, cat["Ăn uống"])).fetchone()["limit_amount"], 1234000)
+        # Tháng 04: khoản chi 100.000 Ăn uống (2/4) so với hạn mức 1.234.000 -> chưa tới 80%
+        self.assertNotIn("Cảnh báo", spend("Ăn uống", 1000, d="2028-04-05"))
+        # Người dùng khác chưa có ngân sách nên không sao chép được từ dữ liệu của mình
+        self.assertIn("chưa có ngân sách nào để sao chép", other.post("/budgets/copy", data={"month": nxt}, follow_redirects=True).get_data(as_text=True))
+
 
 if __name__ == "__main__":
     unittest.main()
