@@ -8,8 +8,10 @@ Website quản lý thu chi cá nhân, dùng Flask + SQLite. Có **đăng ký / �
 - Dashboard: số dư hiện tại (tính trên mọi giao dịch), tổng thu, tổng chi và số còn lại trong tháng, kèm so sánh với tháng trước.
 - Biểu đồ cột thu/chi theo ngày (trong tháng), theo tháng (trong năm) và theo năm; rê chuột hoặc chạm vào cột để xem chi tiết.
 - Biểu đồ chi tiêu theo danh mục.
-- Ngân sách theo tháng/danh mục, cảnh báo từ 80% và khi vượt hạn mức.
-- Lọc theo tháng, loại, danh mục; tìm ghi chú; xuất CSV (UTF-8 BOM, mở được bằng Excel).
+- Ngân sách theo tháng và danh mục: thẻ tổng quan (tổng hạn mức, đã chi, còn lại), thanh tiến độ có vạch mốc 80%, danh sách danh mục vượt kế hoạch kèm số tiền vượt, sửa hạn mức, sao chép ngân sách từ tháng trước.
+- Cảnh báo ngân sách: khi lưu một khoản chi mà danh mục đã dùng từ 80%, đạt hoặc vượt 100% thì hiện cảnh báo ngay; Dashboard có thanh nhắc các danh mục cần chú ý.
+- Quản lý giao dịch: thêm, xem, sửa, xóa; lọc theo khoảng ngày (có nút chọn nhanh: tháng này, tháng trước, 30 ngày qua, năm nay), loại thu/chi và danh mục; tìm theo ghi chú hoặc tên danh mục (không phân biệt hoa thường tiếng Việt); sắp xếp theo ngày hoặc số tiền; phân trang 20 giao dịch mỗi trang; sau khi sửa hoặc xóa sẽ quay về đúng trang đang lọc.
+- Xuất CSV theo đúng bộ lọc đang chọn (lấy toàn bộ kết quả, không chỉ trang hiện tại; UTF-8 BOM, mở được bằng Excel).
 - Giao diện responsive cho máy tính/điện thoại.
 
 ## Chạy trên máy (Windows)
@@ -52,7 +54,7 @@ Dữ liệu cũ được giữ nguyên. **Tài khoản đầu tiên đăng ký s
 ```bat
 python test_app.py
 ```
-Bộ test gồm 12 nhóm: danh mục, CRUD, dashboard, ngân sách, CSV, lưu bền vững, bắt buộc đăng nhập, đăng ký/đăng nhập, cách ly dữ liệu giữa người dùng, CSRF, nâng cấp từ DB cũ, số dư/so sánh kỳ trước/biểu đồ. Test dùng file DB riêng và không ảnh hưởng dữ liệu thật.
+Bộ test gồm 14 nhóm: danh mục, CRUD, dashboard, ngân sách, CSV, lưu bền vững, bắt buộc đăng nhập, đăng ký/đăng nhập, cách ly dữ liệu giữa người dùng, CSRF, nâng cấp từ DB cũ, số dư/so sánh kỳ trước/biểu đồ, tìm kiếm/lọc/sắp xếp/phân trang giao dịch, ngân sách và cảnh báo. Test dùng file DB riêng và không ảnh hưởng dữ liệu thật.
 
 ## Bảo mật
 - Mọi truy vấn dữ liệu đều lọc theo `user_id`; người dùng không xem hoặc sửa được dữ liệu của người khác.
