@@ -44,6 +44,7 @@ def db():
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys=ON")
+    c.create_function("pylower", 1, lambda v: (v or "").lower(), deterministic=True)
     try:
         yield c
         c.commit()
@@ -194,6 +195,22 @@ h2{font-size:18px;margin:0;font-weight:700;letter-spacing:-.01em}
 .bud-foot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
 .msg.warn{color:var(--warn);font-weight:600}.msg.over{color:var(--out);font-weight:600}
 .legend{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:14px}.legend i{width:2px;height:12px;background:var(--ink);opacity:.35;display:inline-block}
+/* ngân sách: tổng quan, cảnh báo, thẻ danh mục */
+.bar .fill.ok{background:var(--in)}
+.bsum{padding:22px 24px}.bsum-top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.bsum-v{font-size:clamp(30px,5vw,42px);font-weight:700;letter-spacing:-.02em;line-height:1.1;margin-top:4px}
+.bsum-pct{font-size:30px;font-weight:700;letter-spacing:-.01em}.bsum-pct.ok{color:var(--in)}.bsum-pct.warn{color:var(--warn)}.bsum-pct.over{color:var(--out)}
+.bar.thick{height:14px;margin:16px 0 12px}.bsum-foot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:14px}.bsum-foot b{color:var(--ink)}
+.alerts h2{margin-bottom:12px}.alerts ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.al{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-radius:10px;font-size:14px}.al b{font-weight:600}.al.over{background:#FDEBDD;color:#7A2112}.al.warn{background:#FFF4D6;color:#6B4700}
+.bcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:14px}
+.bcard-top{display:flex;align-items:center;gap:14px}.bcard-main{flex:1;min-width:0}.bcard-main b{display:block}.bcard-main span{display:block}
+.bcard .bud-foot{align-items:center}.bcard .bud-foot .actions{margin-left:auto}
+.alert-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:12px;margin-bottom:16px;text-decoration:none;font-size:14px}
+.alert-bar svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}.alert-bar span:nth-of-type(1){flex:1}
+.alert-bar.over{background:#FDEBDD;border:1px solid #F0BFB2;color:#7A2112}.alert-bar.warn{background:#FFF4D6;border:1px solid #EBD08A;color:#6B4700}
+.alert-bar .link{color:inherit;white-space:nowrap}
+.flash.warn{background:#FFF4D6;border-color:#EBD08A;color:#6B4700}
 /* danh sách giao dịch */
 .txs{list-style:none;margin:0;padding:0}
 .tx{display:grid;grid-template-columns:42px 1fr auto auto;gap:6px 14px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line)}.tx:last-child{border-bottom:0;padding-bottom:0}.tx:first-child{padding-top:0}
@@ -204,11 +221,22 @@ h2{font-size:18px;margin:0;font-weight:700;letter-spacing:-.01em}
 .actions{display:flex;gap:8px;align-items:center}.actions form{margin:0}
 .sum{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--line)}.sum .in{color:var(--in);font-weight:600}.sum .out{color:var(--out);font-weight:600}
 .empty{padding:34px 12px;text-align:center;color:var(--muted)}.empty .btn{margin-top:12px}
+/* bộ lọc, chip, phân trang */
+.head-actions{display:flex;gap:10px;flex-wrap:wrap}.fpanel{padding:18px 20px}
+.presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.preset{padding:6px 14px;border-radius:999px;border:1px solid #DCC9D2;background:#fff;color:var(--ink);font-size:13px;font-weight:500;text-decoration:none}
+.preset:hover{background:var(--soft)}.preset.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.chips-active{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-4px 0 16px}
+.chip-x{display:inline-flex;align-items:center;gap:6px;padding:5px 9px 5px 12px;border-radius:999px;background:var(--soft);border:1px solid var(--line);color:var(--ink);font-size:13px;font-weight:500;text-decoration:none;max-width:100%}
+.chip-x:hover{background:#F3DCE5}.chip-x svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2.4;stroke-linecap:round;flex:none}
+.pager{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.pg{min-width:38px;height:38px;padding:0 12px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid #DCC9D2;background:#fff;color:var(--ink);text-decoration:none;font-weight:600;font-size:14px}
+a.pg:hover{background:var(--soft)}.pg.on{background:var(--brand);border-color:var(--brand);color:#fff}.pg.gap{border:0;background:transparent}
 /* biểu mẫu */
 label{font-size:13px;font-weight:600;display:block;margin-bottom:6px}
 input,select,textarea{width:100%;padding:11px 12px;border:1px solid #DCC9D2;border-radius:10px;background:#fff;font:inherit;color:var(--ink)}
 input:focus,select:focus,textarea:focus{outline:3px solid var(--ring);border-color:var(--brand)}
-.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:start}.f-actions{grid-column:1/-1;display:flex;gap:10px;flex-wrap:wrap}
+.filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}.f-actions{grid-column:1/-1;display:flex;gap:10px;flex-wrap:wrap}
 .formcard{max-width:660px}.field{margin-bottom:20px}
 .seg2{display:grid;grid-template-columns:1fr 1fr;background:var(--soft);border-radius:12px;padding:4px;gap:4px}
 .seg2 label,.chips label{position:relative;margin:0;cursor:pointer}.seg2 input,.chips input{position:absolute;opacity:0;pointer-events:none}
@@ -254,7 +282,7 @@ footer{text-align:center;color:#8E7A84;font-size:12px;padding:6px 20px 24px}
 <header class="top"><div class="top-in"><a class="brand" href="/"><span class="mark" aria-hidden="true">₫</span>Chi Tiêu Thông Minh</a>
 {% if g.user %}<nav class="links" aria-label="Điều hướng chính"><a href="/" class="{{ 'on' if p=='/' }}">Tổng quan</a><a href="/transactions" class="{{ 'on' if p.startswith('/transactions') and p!='/transactions/new' }}">Giao dịch</a><a href="/budgets" class="{{ 'on' if p.startswith('/budgets') }}">Ngân sách</a></nav><a class="btn" href="/transactions/new">Thêm giao dịch</a><div class="who"><span class="who-email">{{ g.user.email }}</span><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn light sm">Đăng xuất</button></form></div>
 {% else %}<nav class="links" aria-label="Tài khoản"><a href="/login" class="{{ 'on' if p=='/login' or p=='/' }}">Đăng nhập</a><a href="/register" class="{{ 'on' if p=='/register' }}">Đăng ký</a></nav>{% endif %}</div></header>
-<main class="wrap">{% with msgs=get_flashed_messages(with_categories=true) %}{% for typ,msg in msgs %}<div class="flash {{ 'error' if typ=='error' else '' }}" role="{{ 'alert' if typ=='error' else 'status' }}">{{ msg }}</div>{% endfor %}{% endwith %}{% block body %}{% endblock %}</main>
+<main class="wrap">{% with msgs=get_flashed_messages(with_categories=true) %}{% for typ,msg in msgs %}<div class="flash {{ typ if typ in ('error','warn') else '' }}" role="{{ 'alert' if typ in ('error','warn') else 'status' }}">{{ msg }}</div>{% endfor %}{% endwith %}{% block body %}{% endblock %}</main>
 {% if g.user %}<nav class="tabbar" aria-label="Điều hướng nhanh">
 <a href="/" class="{{ 'on' if p=='/' }}"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></svg>Tổng quan</a>
 <a href="/transactions" class="{{ 'on' if p.startswith('/transactions') and p!='/transactions/new' }}"><svg viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>Giao dịch</a>
@@ -267,6 +295,7 @@ DASH = r"""{% extends base %}{% block body %}
 {% set bal=income-expense %}
 <div class="head"><div><h1>Chi tiêu của bạn</h1><p class="muted" style="margin:0">Tiền vào, tiền ra và ngân sách trong tháng.</p></div>
 <div class="month"><a href="/?month={{ prev_month }}" aria-label="Tháng trước"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><form method="get"><input type="month" name="month" value="{{ month }}" onchange="this.form.submit()" aria-label="Chọn tháng"><noscript><button class="btn sm">Xem</button></noscript></form><a href="/?month={{ next_month }}" aria-label="Tháng sau"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></a></div></div>
+{% if b_over or b_warn %}<a class="alert-bar {{ 'over' if b_over else 'warn' }}" href="/budgets?month={{ month }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/></svg><span>{% if b_over %}<b>{{ b_over|length }} danh mục vượt ngân sách:</b> {{ b_over|map(attribute='name')|join(', ') }}.{% endif %}{% if b_warn %} <b>{{ b_warn|length }} danh mục đã dùng từ 80%:</b> {{ b_warn|map(attribute='name')|join(', ') }}.{% endif %}</span><span class="link">Xem chi tiết</span></a>{% endif %}
 <section class="hero" aria-labelledby="bal-label">
 <div class="hero-top"><span id="bal-label">Số dư hiện tại</span><span class="pill">Tất cả giao dịch</span></div>
 <div class="big num{{ ' neg' if balance<0 }}">{{ balance|money }}</div>
@@ -291,7 +320,7 @@ DASH = r"""{% extends base %}{% block body %}
 {% if bycat %}<ul class="cats">{% for x in bycat %}<li><div class="cat-row"><span class="dot" style="background:{{ cat_color(x.id) }}"></span><span class="cat-name">{{ x.name }}</span><span class="cat-share">{{ (x.total/expense*100)|round|int }}%</span><b class="num">{{ x.total|money }}</b></div><div class="bar"><div class="fill" style="width:{{ (x.total/maxcat*100)|round }}%;background:{{ cat_color(x.id) }}"></div></div></li>{% endfor %}</ul>
 {% else %}<div class="empty">Chưa có khoản chi nào trong tháng này.<br><a class="btn" href="/transactions/new">Thêm giao dịch</a></div>{% endif %}</section>
 <section class="panel"><div class="panel-h"><h2>Ngân sách tháng {{ month|vmonth }}</h2><a class="link" href="/budgets?month={{ month }}">Quản lý ngân sách</a></div>
-{% if budgets %}{% for b in budgets %}{% set pct=b.spent/b.limit_amount*100 %}{% set st='over' if pct>=100 else ('warn' if pct>=80 else 'ok') %}<div class="bud"><div class="bud-top"><span class="dot" style="background:{{ cat_color(b.category_id) }}"></span><b>{{ b.name }}</b><span class="bud-pct num {{ st }}">{{ pct|round|int }}%</span></div><div class="bar mark80"><div class="fill {{ st }}" style="width:{{ [pct,100]|min }}%"></div></div><div class="bud-foot"><span>{{ b.spent|money }} / {{ b.limit_amount|money }}</span>{% if pct>=80 %}<span class="msg {{ st }}">{{ 'Đã vượt ngân sách' if pct>=100 else 'Đã dùng ít nhất 80% ngân sách' }}</span>{% endif %}</div></div>{% endfor %}<div class="legend"><i></i>Vạch đứng là mốc cảnh báo 80%</div>
+{% if bitems %}{% for b in bitems %}<div class="bud"><div class="bud-top"><span class="dot" style="background:{{ cat_color(b.category_id) }}"></span><b>{{ b.name }}</b><span class="bud-pct num {{ b.state }}">{{ b.pct_i }}%</span></div><div class="bar mark80"><div class="fill {{ b.state }}" style="width:{{ b.width }}%"></div></div><div class="bud-foot"><span>{{ b.spent|money }} / {{ b.limit|money }}</span>{% if b.msg %}<span class="msg {{ b.state }}">{{ b.msg }}</span>{% else %}<span>Còn lại {{ b.remaining|money }}</span>{% endif %}</div></div>{% endfor %}<div class="legend"><i></i>Vạch đứng là mốc cảnh báo 80%</div>
 {% else %}<div class="empty">Chưa đặt ngân sách cho tháng này.<br><a class="btn light" href="/budgets?month={{ month }}">Đặt ngân sách</a></div>{% endif %}</section></div>
 <section class="panel" style="margin-top:18px"><div class="panel-h"><h2>Giao dịch gần đây</h2><a class="link" href="/transactions?month={{ month }}">Xem tất cả</a></div>
 {% if recent %}<ul class="txs">{% for t in recent %}<li class="tx"><span class="ico" style="--c:{{ cat_color(t.category_id) }}" aria-hidden="true">{{ t.category|first|upper }}</span><div class="tx-main"><b>{{ t.note or t.category }}</b><div class="tx-meta"><span>{{ t.category }}</span><span>{{ t.tx_date|vdate }}</span></div></div><span class="tx-amt {{ 'in' if t.kind=='income' else 'out' }}">{{ '+' if t.kind=='income' else '−' }}{{ t.amount|money }}</span><div class="actions"><a class="link" href="/transactions/{{ t.id }}/edit">Sửa</a></div></li>{% endfor %}</ul>
@@ -338,23 +367,34 @@ draw();
 })();</script>{% endblock %}"""
 
 LIST = r"""{% extends base %}{% block body %}
-{% set ti=rows|selectattr('kind','equalto','income')|map(attribute='amount')|sum %}{% set to=rows|selectattr('kind','equalto','expense')|map(attribute='amount')|sum %}
-<div class="head"><div><h1>Giao dịch</h1><p class="muted" style="margin:0">Thêm, sửa, xóa và lọc các khoản thu chi.</p></div><a class="btn" href="/transactions/new">Thêm giao dịch</a></div>
-<form class="panel filters" method="get"><div><label for="f-month">Tháng</label><input id="f-month" type="month" name="month" value="{{ month }}"></div><div><label for="f-kind">Loại</label><select id="f-kind" name="kind"><option value="">Tất cả</option><option value="income" {{ 'selected' if kind=='income' }}>Thu</option><option value="expense" {{ 'selected' if kind=='expense' }}>Chi</option></select></div><div><label for="f-cat">Danh mục</label><select id="f-cat" name="category_id"><option value="">Tất cả</option>{% for c in cats %}<option value="{{ c.id }}" {{ 'selected' if category_id|string==c.id|string }}>{{ c.name }}</option>{% endfor %}</select></div><div><label for="f-q">Tìm ghi chú</label><input id="f-q" name="q" value="{{ q }}" placeholder="Nhập từ khóa"></div><div class="f-actions"><button class="btn">Lọc</button><a class="btn light" href="/transactions">Xóa lọc</a><a class="btn light" href="{{ export_url }}">Xuất CSV</a></div></form>
-<section class="panel"><div class="sum"><span class="muted">{{ rows|length }} giao dịch</span><span class="in num">Thu +{{ ti|money }}</span><span class="out num">Chi −{{ to|money }}</span></div>
-{% if rows %}<ul class="txs">{% for t in rows %}<li class="tx"><span class="ico" style="--c:{{ cat_color(t.category_id) }}" aria-hidden="true">{{ t.category|first|upper }}</span><div class="tx-main"><b>{{ t.note or t.category }}</b><div class="tx-meta"><span>{{ t.category }}</span><span>{{ t.tx_date|vdate }}</span></div></div><span class="tx-amt {{ 'in' if t.kind=='income' else 'out' }}">{{ '+' if t.kind=='income' else '−' }}{{ t.amount|money }}</span><div class="actions"><a class="btn light sm" href="/transactions/{{ t.id }}/edit">Sửa</a><form method="post" action="/transactions/{{ t.id }}/delete" onsubmit="return confirm('Xóa giao dịch này?')"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn danger sm">Xóa</button></form></div></li>{% endfor %}</ul>
-{% else %}<div class="empty">Không có giao dịch nào khớp bộ lọc.<br><a class="btn light" href="/transactions">Xóa bộ lọc</a></div>{% endif %}</section>{% endblock %}"""
+<div class="head"><div><h1>Giao dịch</h1><p class="muted" style="margin:0">Tìm kiếm, lọc theo thời gian, danh mục, loại thu chi và quản lý từng khoản.</p></div><div class="head-actions"><a class="btn light" href="{{ export_url }}">Xuất CSV</a><a class="btn" href="/transactions/new?next={{ back|urlencode }}">Thêm giao dịch</a></div></div>
+<form class="panel fpanel" method="get" action="/transactions">
+<div class="presets" role="group" aria-label="Khoảng thời gian nhanh">{% for p in presets %}<a class="preset{{ ' on' if p.active }}" href="{{ p.url }}"{% if p.active %} aria-current="true"{% endif %}>{{ p.label }}</a>{% endfor %}</div>
+<div class="filters">
+<div><label for="f-from">Từ ngày</label><input id="f-from" type="date" name="date_from" value="{{ f.date_from }}" onchange="this.form.submit()"></div>
+<div><label for="f-to">Đến ngày</label><input id="f-to" type="date" name="date_to" value="{{ f.date_to }}" onchange="this.form.submit()"></div>
+<div><label for="f-kind">Loại</label><select id="f-kind" name="kind" onchange="this.form.submit()"><option value="">Tất cả</option><option value="income" {{ 'selected' if f.kind=='income' }}>Thu</option><option value="expense" {{ 'selected' if f.kind=='expense' }}>Chi</option></select></div>
+<div><label for="f-cat">Danh mục</label><select id="f-cat" name="category_id" onchange="this.form.submit()"><option value="">Tất cả</option>{% for c in cats %}<option value="{{ c.id }}" {{ 'selected' if f.category_id==c.id|string }}>{{ c.name }}</option>{% endfor %}</select></div>
+<div><label for="f-sort">Sắp xếp</label><select id="f-sort" name="sort" onchange="this.form.submit()"><option value="date_desc" {{ 'selected' if f.sort=='date_desc' }}>Mới nhất trước</option><option value="date_asc" {{ 'selected' if f.sort=='date_asc' }}>Cũ nhất trước</option><option value="amount_desc" {{ 'selected' if f.sort=='amount_desc' }}>Số tiền cao đến thấp</option><option value="amount_asc" {{ 'selected' if f.sort=='amount_asc' }}>Số tiền thấp đến cao</option></select></div>
+<div><label for="f-q">Tìm kiếm</label><input id="f-q" name="q" value="{{ f.q }}" maxlength="100" placeholder="Ghi chú hoặc tên danh mục"></div>
+<div class="f-actions"><button class="btn">Lọc</button><a class="btn light" href="{{ clear_url }}">Xóa lọc</a></div></div></form>
+{% if chips %}<div class="chips-active"><span class="muted small">Đang lọc:</span>{% for c in chips %}<a class="chip-x" href="{{ c.url }}" aria-label="Bỏ lọc {{ c.label }}">{{ c.label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></a>{% endfor %}<a class="link small" href="{{ clear_url }}">Xóa tất cả</a></div>{% endif %}
+<section class="panel"><div class="sum"><span class="muted">{{ total }} giao dịch{% if total %}, đang xem {{ start }} đến {{ end }}{% endif %}</span><span class="in num">Thu +{{ tot_in|money }}</span><span class="out num">Chi −{{ tot_out|money }}</span></div>
+{% if rows %}<ul class="txs">{% for t in rows %}<li class="tx"><span class="ico" style="--c:{{ cat_color(t.category_id) }}" aria-hidden="true">{{ t.category|first|upper }}</span><div class="tx-main"><b>{{ t.note or t.category }}</b><div class="tx-meta"><span>{{ t.category }}</span><span>{{ t.tx_date|vdate }}</span></div></div><span class="tx-amt {{ 'in' if t.kind=='income' else 'out' }}">{{ '+' if t.kind=='income' else '−' }}{{ t.amount|money }}</span><div class="actions"><a class="btn light sm" href="/transactions/{{ t.id }}/edit?next={{ back|urlencode }}">Sửa</a><form method="post" action="/transactions/{{ t.id }}/delete" onsubmit="return confirm('Xóa giao dịch này?')"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ back }}"><button class="btn danger sm">Xóa</button></form></div></li>{% endfor %}</ul>
+{% if pages>1 %}<nav class="pager" aria-label="Phân trang">{% if page_no>1 %}<a class="pg" href="{{ prev_url }}">Trước</a>{% endif %}{% for it in page_items %}{% if it.gap %}<span class="pg gap">…</span>{% else %}<a class="pg{{ ' on' if it.current }}" href="{{ it.url }}"{% if it.current %} aria-current="page"{% endif %}>{{ it.n }}</a>{% endif %}{% endfor %}{% if page_no<pages %}<a class="pg" href="{{ next_url }}">Sau</a>{% endif %}</nav>{% endif %}
+{% elif chips %}<div class="empty">Không có giao dịch nào khớp bộ lọc.<br><a class="btn light" href="{{ clear_url }}">Xóa bộ lọc</a></div>
+{% else %}<div class="empty">Chưa có giao dịch nào.<br><a class="btn" href="/transactions/new">Thêm giao dịch đầu tiên</a></div>{% endif %}</section>{% endblock %}"""
 
 FORM = r"""{% extends base %}{% block body %}
-<nav class="crumbs" aria-label="Đường dẫn"><a href="/transactions">Giao dịch</a><span aria-hidden="true">/</span><span aria-current="page">{{ 'Sửa giao dịch' if row else 'Thêm giao dịch mới' }}</span></nav>
-<div class="head head-form"><div><h1 class="caps">{{ 'SỬA GIAO DỊCH' if row else 'THÊM GIAO DỊCH MỚI' }}</h1><p class="muted lead">{{ 'Cập nhật thông tin khoản thu hoặc chi này.' if row else 'Ghi nhận khoản thu và chi để theo dõi dòng tiền, kiểm soát ngân sách và quản lý tài chính hiệu quả hơn.' }}</p></div><a class="btn light" href="/transactions">Quay lại</a></div>
+<nav class="crumbs" aria-label="Đường dẫn"><a href="{{ back_url }}">Giao dịch</a><span aria-hidden="true">/</span><span aria-current="page">{{ 'Sửa giao dịch' if row else 'Thêm giao dịch mới' }}</span></nav>
+<div class="head head-form"><div><h1 class="caps">{{ 'SỬA GIAO DỊCH' if row else 'THÊM GIAO DỊCH MỚI' }}</h1><p class="muted lead">{{ 'Cập nhật thông tin khoản thu hoặc chi này.' if row else 'Ghi nhận khoản thu và chi để theo dõi dòng tiền, kiểm soát ngân sách và quản lý tài chính hiệu quả hơn.' }}</p></div><a class="btn light" href="{{ back_url }}">Quay lại</a></div>
 <form class="panel formcard" method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <div class="field"><div class="seg2" role="radiogroup" aria-label="Loại giao dịch"><label><input type="radio" name="kind" value="expense" {{ 'checked' if not row or row.kind=='expense' }}><span>Chi tiêu</span></label><label><input type="radio" name="kind" value="income" {{ 'checked' if row and row.kind=='income' }}><span>Thu nhập</span></label></div></div>
 <div class="field"><label for="amount">Số tiền (VND) *</label><div class="amount-box"><input class="amount" id="amount" name="amount" type="text" inputmode="numeric" pattern="[0-9.,\s]+" maxlength="18" autocomplete="off" required value="{{ row.amount if row else '' }}" placeholder="150000"><span class="unit">đ</span></div><div class="quick" aria-label="Cộng nhanh"><button type="button" data-add="50000">+50k</button><button type="button" data-add="100000">+100k</button><button type="button" data-add="500000">+500k</button><button type="button" data-add="1000000">+1tr</button><span class="amt-fmt" id="amt-fmt" aria-live="polite"></span></div></div>
 <div class="field"><span class="sr" id="cat-label">Danh mục</span><label aria-hidden="true">Danh mục *</label><div class="chips" role="radiogroup" aria-labelledby="cat-label">{% for c in cats %}<label><input type="radio" name="category_id" value="{{ c.id }}" data-kind="{{ c.kind }}" required {{ 'checked' if row and row.category_id==c.id }}><span><i class="dot" style="background:{{ cat_color(c.id) }}"></i>{{ c.name }}</span></label>{% endfor %}</div></div>
 <div class="two field"><div><label for="tx_date">Ngày *</label><input id="tx_date" name="tx_date" type="date" required value="{{ row.tx_date if row else today }}"></div></div>
 <div class="field"><label for="note">Ghi chú</label><textarea id="note" name="note" rows="3" maxlength="300" placeholder="Ví dụ: ăn trưa với đồng nghiệp">{{ row.note if row else '' }}</textarea></div>
-<div class="form-actions"><a class="btn light" href="/transactions">Hủy</a><button class="btn">Lưu giao dịch</button></div></form>
+<div class="form-actions"><a class="btn light" href="{{ back_url }}">Hủy</a><button class="btn">Lưu giao dịch</button></div></form>
 <script>(function(){var kinds=document.querySelectorAll('input[name=kind]'),chips=document.querySelectorAll('.chips label');
 function sync(){var k=document.querySelector('input[name=kind]:checked').value,has=false;chips.forEach(function(l){var r=l.querySelector('input'),ok=r.dataset.kind===k;l.hidden=!ok;if(!ok)r.checked=false;else if(r.checked)has=true});if(!has){for(var i=0;i<chips.length;i++){if(!chips[i].hidden){chips[i].querySelector('input').checked=true;break}}}}
 kinds.forEach(function(r){r.addEventListener('change',sync)});sync();
@@ -364,17 +404,31 @@ a.addEventListener('input',fmt);fmt();
 document.querySelectorAll('[data-add]').forEach(function(b){b.addEventListener('click',function(){var d=a.value.replace(/[^0-9]/g,'');a.value=String(Number(d||0)+Number(b.dataset.add));fmt();a.focus()})});})();</script>{% endblock %}"""
 
 BUDGETS = r"""{% extends base %}{% block body %}
-<div class="head"><div><h1>Ngân sách</h1><p class="muted" style="margin:0">Đặt hạn mức chi theo tháng và danh mục.</p></div>
+<div class="head"><div><h1>Ngân sách</h1><p class="muted" style="margin:0">Đặt hạn mức chi theo tháng và danh mục, theo dõi mức đã dùng.</p></div>
 <div class="month"><a href="/budgets?month={{ prev_month }}" aria-label="Tháng trước"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><form method="get"><input type="month" name="month" value="{{ month }}" onchange="this.form.submit()" aria-label="Chọn tháng"><noscript><button class="btn sm">Xem</button></noscript></form><a href="/budgets?month={{ next_month }}" aria-label="Tháng sau"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></a></div></div>
+{% if items %}
+<section class="panel bsum" aria-label="Tổng quan ngân sách tháng {{ month|vmonth }}"><div class="bsum-top"><div><div class="muted">Tổng ngân sách tháng {{ month|vmonth }}</div><div class="num bsum-v">{{ total.limit|money }}</div></div><div class="bsum-pct num {{ total.state }}">{{ total.pct_i }}%</div></div>
+<div class="bar thick mark80"><div class="fill {{ total.state }}" style="width:{{ total.width }}%"></div></div>
+<div class="bsum-foot"><span>Đã chi <b class="num">{{ total.spent|money }}</b></span><span>{% if total.remaining>=0 %}Còn lại <b class="num">{{ total.remaining|money }}</b>{% else %}Chi vượt <b class="num">{{ (0-total.remaining)|money }}</b>{% endif %}</span></div></section>
+{% if over or warn %}<section class="panel alerts" aria-label="Cảnh báo ngân sách"><h2>Cần chú ý</h2><ul>
+{% for b in over %}<li class="al over"><i class="dot" style="background:{{ cat_color(b.category_id) }}"></i><b>{{ b.name }}</b><span>{% if b.over>0 %}vượt kế hoạch {{ b.over|money }} ({{ b.pct_i }}%){% else %}đã dùng hết ngân sách (100%){% endif %}</span></li>{% endfor %}
+{% for b in warn %}<li class="al warn"><i class="dot" style="background:{{ cat_color(b.category_id) }}"></i><b>{{ b.name }}</b><span>đã dùng {{ b.pct_i }}%, còn {{ b.remaining|money }}</span></li>{% endfor %}</ul></section>{% endif %}
+{% endif %}
 <div class="budget-layout">
-<section class="panel"><h2 style="margin-bottom:16px">Thiết lập ngân sách</h2><form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
-<div class="field"><label for="b-month">Tháng</label><input id="b-month" type="month" name="month" value="{{ month }}" required></div>
-<div class="field"><label for="b-cat">Danh mục chi</label><select id="b-cat" name="category_id" required>{% for c in cats %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
-<div class="field"><label for="b-limit">Hạn mức (VND)</label><input id="b-limit" type="text" inputmode="numeric" pattern="[0-9.,\s]+" maxlength="18" autocomplete="off" name="limit_amount" required placeholder="2000000"></div>
-<button class="btn wide">Lưu ngân sách</button><p class="muted small" style="margin:12px 0 0">Đặt lại cho cùng danh mục và tháng sẽ cập nhật hạn mức cũ.</p></form></section>
-<section class="panel"><div class="panel-h"><h2>Ngân sách tháng {{ month|vmonth }}</h2></div>
-{% if rows %}{% for b in rows %}{% set pct=b.spent/b.limit_amount*100 %}{% set st='over' if pct>=100 else ('warn' if pct>=80 else 'ok') %}<div class="bud"><div class="bud-top"><span class="dot" style="background:{{ cat_color(b.category_id) }}"></span><b>{{ b.name }}</b><span class="bud-pct num {{ st }}">{{ pct|round|int }}%</span><form method="post" action="/budgets/{{ b.id }}/delete" onsubmit="return confirm('Xóa ngân sách?')" style="margin:0"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn danger sm">Xóa</button></form></div><div class="bar mark80"><div class="fill {{ st }}" style="width:{{ [pct,100]|min }}%"></div></div><div class="bud-foot"><span>{{ b.spent|money }} / {{ b.limit_amount|money }}</span><span class="msg {{ st }}">{{ 'Đã vượt ngân sách' if pct>=100 else ('Đã dùng ít nhất 80% ngân sách' if pct>=80 else 'Còn lại '+((b.limit_amount-b.spent)|money)) }}</span></div></div>{% endfor %}<div class="legend"><i></i>Vạch đứng là mốc cảnh báo 80%</div>
-{% else %}<div class="empty">Chưa có ngân sách cho tháng này.<br>Chọn danh mục và hạn mức ở khung bên cạnh.</div>{% endif %}</section></div>{% endblock %}"""
+<section class="panel"><h2 style="margin-bottom:16px">{{ 'Sửa ngân sách' if edit else 'Thiết lập ngân sách' }}</h2><form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% if edit %}<div class="field"><label for="b-month-ro">Tháng</label><input id="b-month-ro" value="{{ month|vmonth }}" disabled><input type="hidden" name="month" value="{{ month }}"></div>
+<div class="field"><label for="b-cat-ro">Danh mục chi</label><input id="b-cat-ro" value="{{ edit.name }}" disabled><input type="hidden" name="category_id" value="{{ edit.category_id }}"></div>
+{% else %}<div class="field"><label for="b-month">Tháng</label><input id="b-month" type="month" name="month" value="{{ month }}" required></div>
+<div class="field"><label for="b-cat">Danh mục chi</label><select id="b-cat" name="category_id" required>{% for c in cats %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>{% endif %}
+<div class="field"><label for="b-limit">Hạn mức (VND)</label><input id="b-limit" type="text" inputmode="numeric" pattern="[0-9.,\s]+" maxlength="18" autocomplete="off" name="limit_amount" required placeholder="2000000" value="{{ edit.limit_amount if edit else '' }}"></div>
+<button class="btn wide">{{ 'Cập nhật ngân sách' if edit else 'Lưu ngân sách' }}</button>{% if edit %}<a class="btn light wide" style="margin-top:10px" href="/budgets?month={{ month }}">Hủy</a>{% endif %}
+<p class="muted small" style="margin:12px 0 0">Đặt lại cho cùng danh mục và tháng sẽ cập nhật hạn mức cũ. Cảnh báo xuất hiện khi dùng từ 80% và khi đạt hoặc vượt 100%.</p></form>
+{% if not edit %}<form method="post" action="/budgets/copy" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="month" value="{{ month }}"><button class="btn light wide">Sao chép từ tháng {{ prev_month|vmonth }}</button></form>{% endif %}</section>
+<div>{% if items %}{% for b in items %}<article class="bcard"><div class="bcard-top"><span class="ico" style="--c:{{ cat_color(b.category_id) }}" aria-hidden="true">{{ b.name|first|upper }}</span><div class="bcard-main"><b>{{ b.name }}</b><span class="muted small num">{{ b.spent|money }} / {{ b.limit|money }}</span></div><span class="bud-pct num {{ b.state }}">{{ b.pct_i }}%</span></div>
+<div class="bar mark80"><div class="fill {{ b.state }}" style="width:{{ b.width }}%"></div></div>
+<div class="bud-foot"><span>{% if b.remaining>=0 %}Còn lại {{ b.remaining|money }}{% else %}Vượt {{ b.over|money }}{% endif %}{% if b.msg %} <span class="msg {{ b.state }}">{{ b.msg }}</span>{% endif %}</span>
+<div class="actions"><a class="btn light sm" href="/budgets?month={{ month }}&edit={{ b.id }}">Sửa</a><form method="post" action="/budgets/{{ b.id }}/delete" onsubmit="return confirm('Xóa ngân sách?')" style="margin:0"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn danger sm">Xóa</button></form></div></div></article>{% endfor %}<div class="legend"><i></i>Vạch đứng là mốc cảnh báo 80%</div>
+{% else %}<div class="panel empty">Chưa có ngân sách cho tháng này.<br>Chọn danh mục và hạn mức ở khung bên cạnh, hoặc sao chép từ tháng trước.</div>{% endif %}</div></div>{% endblock %}"""
 
 LOGIN = r"""{% extends base %}{% block body %}<div class="auth"><aside class="auth-side"><span class="mark" aria-hidden="true">₫</span><h1>Biết tiền của bạn đi đâu mỗi tháng</h1><ul><li>Ghi khoản thu chi chỉ trong vài chạm</li><li>Đặt ngân sách và nhận cảnh báo từ mức 80%</li><li>Xuất CSV, mở được bằng Excel</li></ul></aside>
 <form class="auth-form" method="post" action="{{ url_for('login', next=next_url) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><h2>Đăng nhập</h2><p class="muted" style="margin:0 0 22px">Xem và quản lý chi tiêu của bạn.</p>
@@ -477,8 +531,8 @@ def login_required(f):
         return f(*args, **kwargs)
     return wrapper
 
-def safe_next(n):
-    return n if n and n.startswith("/") and not n.startswith("//") and "\\" not in n else url_for("dashboard")
+def safe_next(n, default=None):
+    return n if n and n.startswith("/") and not n.startswith("//") and "\\" not in n else (default or url_for("dashboard"))
 
 def start_session(user_id):
     session.clear()
@@ -564,6 +618,38 @@ def logout():
     flash("Đã đăng xuất.", "success")
     return redirect(url_for("login"))
 
+def budget_view(rows):
+    """Chuẩn hóa dữ liệu ngân sách: phần trăm, trạng thái, còn lại/vượt, tổng hợp và danh sách cần cảnh báo."""
+    items = []
+    for r in rows:
+        limit, spent = r["limit_amount"], r["spent"]
+        pct = spent / limit * 100
+        if spent > limit: msg = "Đã vượt ngân sách"
+        elif spent == limit: msg = "Đã dùng hết ngân sách"
+        elif pct >= 80: msg = "Đã dùng ít nhất 80% ngân sách"
+        else: msg = ""
+        items.append({"id": r["id"], "name": r["name"], "category_id": r["category_id"], "spent": spent, "limit": limit,
+                      "pct": pct, "pct_i": round(pct), "state": "over" if pct >= 100 else ("warn" if pct >= 80 else "ok"),
+                      "remaining": limit - spent, "over": max(0, spent - limit), "msg": msg, "width": round(min(pct, 100), 1)})
+    items.sort(key=lambda i: -i["pct"])
+    tl, ts = sum(i["limit"] for i in items), sum(i["spent"] for i in items)
+    tp = ts / tl * 100 if tl else 0
+    total = {"limit": tl, "spent": ts, "remaining": tl - ts, "pct_i": round(tp), "width": round(min(tp, 100), 1),
+             "state": "over" if tp >= 100 else ("warn" if tp >= 80 else "ok")}
+    return {"items": items, "total": total,
+            "over": [i for i in items if i["state"] == "over"], "warn": [i for i in items if i["state"] == "warn"]}
+
+def budget_warning(c, user_id, tx_date, category_id):
+    """Sau khi lưu một khoản chi: trả về câu cảnh báo nếu danh mục đó đã dùng từ 80% ngân sách tháng."""
+    month = tx_date[:7]
+    r = c.execute("""SELECT b.limit_amount,ca.name,COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.user_id=b.user_id AND t.category_id=b.category_id AND t.kind='expense' AND substr(t.tx_date,1,7)=b.month),0) spent FROM budgets b JOIN categories ca ON ca.id=b.category_id WHERE b.user_id=? AND b.month=? AND b.category_id=?""", (user_id, month, category_id)).fetchone()
+    if not r: return None
+    limit, spent, vm = r["limit_amount"], r["spent"], vmonth(month)
+    if spent > limit: return f"Cảnh báo: {r['name']} đã vượt ngân sách tháng {vm} là {money(spent - limit)}."
+    if spent == limit: return f"Cảnh báo: {r['name']} đã dùng hết ngân sách tháng {vm}."
+    if spent / limit * 100 >= 80: return f"Cảnh báo: {r['name']} đã dùng {round(spent / limit * 100)}% ngân sách tháng {vm}."
+    return None
+
 # ---------------------------------------------------------------- Chức năng chính (mọi truy vấn lọc theo user_id)
 @app.route("/")
 def dashboard():
@@ -575,6 +661,7 @@ def dashboard():
         bycat=c.execute("SELECT ca.id,ca.name,SUM(t.amount) total FROM transactions t JOIN categories ca ON ca.id=t.category_id WHERE t.user_id=? AND t.kind='expense' AND substr(t.tx_date,1,7)=? GROUP BY ca.id ORDER BY total DESC",(u,month)).fetchall()
         recent=c.execute("SELECT t.*,ca.name category FROM transactions t JOIN categories ca ON ca.id=t.category_id WHERE t.user_id=? AND substr(t.tx_date,1,7)=? ORDER BY tx_date DESC,t.id DESC LIMIT 8",(u,month)).fetchall()
         budgets=c.execute("""SELECT b.*,ca.name,COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.user_id=b.user_id AND t.category_id=b.category_id AND t.kind='expense' AND substr(t.tx_date,1,7)=b.month),0) spent FROM budgets b JOIN categories ca ON ca.id=b.category_id WHERE b.user_id=? AND b.month=?""",(u,month)).fetchall()
+    bv = budget_view(budgets)
     prev = shift_month(month, -1)
     with db() as c:
         balance = c.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE -amount END),0) FROM transactions WHERE user_id=?", (u,)).fetchone()[0]
@@ -583,25 +670,92 @@ def dashboard():
     d_income = delta(totals["income"], p["i"], True)
     d_expense = delta(totals["expense"], p["e"], False)
     d_net = delta(totals["income"] - totals["expense"], p["i"] - p["e"], True)
-    return page(DASH, title="Tổng quan", balance=balance, d_income=d_income, d_expense=d_expense, d_net=d_net, chart=chart,month=month,income=totals["income"],expense=totals["expense"],bycat=bycat,maxcat=max([x["total"] for x in bycat],default=1),recent=recent,budgets=budgets,prev_month=shift_month(month,-1),next_month=shift_month(month,1))
+    return page(DASH, title="Tổng quan", balance=balance, d_income=d_income, d_expense=d_expense, d_net=d_net, chart=chart,month=month,income=totals["income"],expense=totals["expense"],bycat=bycat,maxcat=max([x["total"] for x in bycat],default=1),recent=recent,bitems=bv["items"],b_over=bv["over"],b_warn=bv["warn"],prev_month=shift_month(month,-1),next_month=shift_month(month,1))
+
+PER_PAGE = 20
+SORTS = {"date_desc": "t.tx_date DESC,t.id DESC", "date_asc": "t.tx_date ASC,t.id ASC",
+         "amount_desc": "t.amount DESC,t.id DESC", "amount_asc": "t.amount ASC,t.id ASC"}
+TX_FROM = "FROM transactions t JOIN categories ca ON ca.id=t.category_id"
+
+def valid_date(v):
+    try: datetime.strptime(v, "%Y-%m-%d"); return True
+    except (ValueError, TypeError): return False
+
+def parse_filters(args):
+    """Đọc và làm sạch bộ lọc từ URL. Tham số cũ ?month=YYYY-MM được đổi thành khoảng ngày."""
+    kind = args.get("kind", ""); kind = kind if kind in ("income", "expense") else ""
+    cat = args.get("category_id", ""); cat = cat if cat.isdigit() and len(cat) <= 9 else ""
+    q = args.get("q", "").strip()[:100]
+    d_from, d_to = args.get("date_from", ""), args.get("date_to", "")
+    d_from = d_from if valid_date(d_from) else ""; d_to = d_to if valid_date(d_to) else ""
+    if not d_from and not d_to:
+        month = args.get("month", "")
+        try:
+            datetime.strptime(month, "%Y-%m")
+            d_from, d_to = f"{month}-01", f"{month}-{calendar.monthrange(int(month[:4]), int(month[5:7]))[1]:02d}"
+        except (ValueError, TypeError):
+            pass
+    if d_from and d_to and d_from > d_to: d_from, d_to = d_to, d_from
+    sort = args.get("sort", ""); sort = sort if sort in SORTS else "date_desc"
+    return {"kind": kind, "category_id": cat, "q": q, "date_from": d_from, "date_to": d_to, "sort": sort}
+
+def filter_sql(f, user_id):
+    where, params = "t.user_id=?", [user_id]
+    if f["date_from"]: where += " AND t.tx_date>=?"; params.append(f["date_from"])
+    if f["date_to"]: where += " AND t.tx_date<=?"; params.append(f["date_to"])
+    if f["kind"]: where += " AND t.kind=?"; params.append(f["kind"])
+    if f["category_id"]: where += " AND t.category_id=?"; params.append(int(f["category_id"]))
+    if f["q"]:
+        like = "%" + f["q"].lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where += " AND (pylower(t.note) LIKE ? ESCAPE '\\' OR pylower(ca.name) LIKE ? ESCAPE '\\')"
+        params += [like, like]
+    return where, params
 
 @app.route("/transactions")
 @login_required
 def tx_list():
-    month=request.args.get("month",""); kind=request.args.get("kind",""); cat=request.args.get("category_id",""); q=request.args.get("q","").strip()
-    sql="SELECT t.*,ca.name category FROM transactions t JOIN categories ca ON ca.id=t.category_id WHERE t.user_id=?"; params=[uid()]
-    if month:
-        try: datetime.strptime(month,"%Y-%m"); sql+=" AND substr(t.tx_date,1,7)=?"; params.append(month)
-        except ValueError: month=""
-    if kind in ("income","expense"): sql+=" AND t.kind=?"; params.append(kind)
-    else: kind=""
-    if cat.isdigit(): sql+=" AND t.category_id=?"; params.append(int(cat))
-    else: cat=""
-    if q: sql+=" AND t.note LIKE ?"; params.append("%"+q+"%")
-    sql+=" ORDER BY t.tx_date DESC,t.id DESC"
-    with db() as c: rows=c.execute(sql,params).fetchall()
-    export_url=url_for("export_csv",month=month,kind=kind,category_id=cat,q=q)
-    return page(LIST,title="Giao dịch",rows=rows,cats=categories(),month=month,kind=kind,category_id=cat,q=q,export_url=export_url)
+    f = parse_filters(request.args)
+    where, params = filter_sql(f, uid())
+    try: page_no = max(1, int(request.args.get("page", "1")))
+    except ValueError: page_no = 1
+    with db() as c:
+        agg = c.execute(f"SELECT COUNT(*) n, COALESCE(SUM(CASE WHEN t.kind='income' THEN t.amount END),0) i, COALESCE(SUM(CASE WHEN t.kind='expense' THEN t.amount END),0) e {TX_FROM} WHERE {where}", params).fetchone()
+        pages = max(1, -(-agg["n"] // PER_PAGE)); page_no = min(page_no, pages)
+        rows = c.execute(f"SELECT t.*,ca.name category {TX_FROM} WHERE {where} ORDER BY {SORTS[f['sort']]} LIMIT ? OFFSET ?", params + [PER_PAGE, (page_no - 1) * PER_PAGE]).fetchall()
+    cats = categories()
+
+    def link(**over):
+        p = {k: v for k, v in f.items() if v and not (k == "sort" and v == "date_desc")}
+        p.update(over)
+        return url_for("tx_list", **{k: v for k, v in p.items() if v not in ("", None)})
+
+    cat_name = next((c["name"] for c in cats if str(c["id"]) == f["category_id"]), None)
+    chips = []
+    if f["date_from"]: chips.append({"label": "Từ " + vdate(f["date_from"]), "url": link(date_from="")})
+    if f["date_to"]: chips.append({"label": "Đến " + vdate(f["date_to"]), "url": link(date_to="")})
+    if f["kind"]: chips.append({"label": "Loại: " + ("Thu" if f["kind"] == "income" else "Chi"), "url": link(kind="")})
+    if cat_name: chips.append({"label": "Danh mục: " + cat_name, "url": link(category_id="")})
+    if f["q"]: chips.append({"label": "Tìm: " + f["q"], "url": link(q="")})
+
+    today = date.today(); first = today.replace(day=1); prev_last = first - timedelta(days=1)
+    presets = [("Tháng này", first.isoformat(), today.replace(day=calendar.monthrange(today.year, today.month)[1]).isoformat()),
+               ("Tháng trước", prev_last.replace(day=1).isoformat(), prev_last.isoformat()),
+               ("30 ngày qua", (today - timedelta(days=29)).isoformat(), today.isoformat()),
+               ("Năm nay", f"{today.year}-01-01", f"{today.year}-12-31"),
+               ("Tất cả", "", "")]
+    presets = [{"label": l, "url": link(date_from=a, date_to=b), "active": f["date_from"] == a and f["date_to"] == b} for l, a, b in presets]
+
+    page_items, last = [], 0
+    for n in sorted({1, pages, page_no - 1, page_no, page_no + 1} & set(range(1, pages + 1))):
+        if n - last > 1: page_items.append({"gap": True})
+        page_items.append({"n": n, "url": link(page=n) if n > 1 else link(), "current": n == page_no}); last = n
+    start = (page_no - 1) * PER_PAGE + 1 if agg["n"] else 0
+    export_url = url_for("export_csv", **{k: v for k, v in f.items() if v and k != "sort"})
+    return page(LIST, title="Giao dịch", rows=rows, cats=cats, f=f, total=agg["n"], tot_in=agg["i"], tot_out=agg["e"],
+                page_no=page_no, pages=pages, page_items=page_items,
+                prev_url=link(page=page_no - 1) if page_no > 2 else link(), next_url=link(page=page_no + 1),
+                chips=chips, presets=presets, export_url=export_url, clear_url=url_for("tx_list"),
+                start=start, end=start + len(rows) - 1 if rows else 0, back=request.full_path.rstrip("?"))
 
 def save_tx(txid=None):
     kind=request.form.get("kind",""); amount=request.form.get("amount",""); tx_date=request.form.get("tx_date",""); cat=request.form.get("category_id",""); note=request.form.get("note","").strip()
@@ -613,7 +767,10 @@ def save_tx(txid=None):
             if not category or category["kind"]!=kind: raise ValueError
             if txid: c.execute("UPDATE transactions SET kind=?,amount=?,tx_date=?,category_id=?,note=? WHERE id=? AND user_id=?",(kind,amount,tx_date,int(cat),note,txid,uid()))
             else: c.execute("INSERT INTO transactions(kind,amount,tx_date,category_id,note,user_id) VALUES(?,?,?,?,?,?)",(kind,amount,tx_date,int(cat),note,uid()))
-        flash("Đã lưu giao dịch.","success"); return redirect(url_for("tx_list"))
+            warning=budget_warning(c,uid(),tx_date,int(cat)) if kind=="expense" else None
+        flash("Đã lưu giao dịch.","success")
+        if warning: flash(warning,"warn")
+        return redirect(safe_next(request.args.get("next"), url_for("tx_list")))
     except (ValueError,TypeError,OverflowError):
         flash("Dữ liệu không hợp lệ. Kiểm tra số tiền, ngày và danh mục.","error"); return None
 
@@ -623,7 +780,7 @@ def tx_new():
     if request.method=="POST":
         result=save_tx()
         if result: return result
-    return page(FORM,title="Thêm giao dịch",row=None,cats=categories(),today=date.today().isoformat())
+    return page(FORM,title="Thêm giao dịch",row=None,cats=categories(),today=date.today().isoformat(),back_url=safe_next(request.args.get("next"), url_for("tx_list")))
 
 @app.route("/transactions/<int:txid>/edit",methods=["GET","POST"])
 @login_required
@@ -634,18 +791,24 @@ def tx_edit(txid):
         result=save_tx(txid)
         if result: return result
         with db() as c: row=c.execute("SELECT * FROM transactions WHERE id=? AND user_id=?",(txid,uid())).fetchone()
-    return page(FORM,title="Sửa giao dịch",row=row,cats=categories(),today=date.today().isoformat())
+    return page(FORM,title="Sửa giao dịch",row=row,cats=categories(),today=date.today().isoformat(),back_url=safe_next(request.args.get("next"), url_for("tx_list")))
 
 @app.route("/transactions/<int:txid>/delete",methods=["POST"])
 @login_required
 def tx_delete(txid):
     with db() as c: c.execute("DELETE FROM transactions WHERE id=? AND user_id=?",(txid,uid()))
-    flash("Đã xóa giao dịch.","success"); return redirect(url_for("tx_list"))
+    flash("Đã xóa giao dịch.","success"); return redirect(safe_next(request.form.get("next"), url_for("tx_list")))
 
 @app.route("/budgets",methods=["GET","POST"])
 @login_required
 def budget_page():
     month=month_arg(request.values.get("month",date.today().strftime("%Y-%m")))
+    edit=None
+    edit_id=request.args.get("edit","")
+    if edit_id.isdigit() and len(edit_id)<=9:
+        with db() as c:
+            edit=c.execute("SELECT b.*,ca.name FROM budgets b JOIN categories ca ON ca.id=b.category_id WHERE b.id=? AND b.user_id=?",(int(edit_id),uid())).fetchone()
+        if edit: month=edit["month"]
     if request.method=="POST":
         cat=request.form.get("category_id",""); amount=request.form.get("limit_amount",""); month=month_arg(request.form.get("month",month))
         try:
@@ -658,7 +821,22 @@ def budget_page():
         except (ValueError,TypeError,OverflowError): flash("Chọn danh mục và nhập hạn mức lớn hơn 0.","error")
     with db() as c:
         rows=c.execute("""SELECT b.*,ca.name,COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.user_id=b.user_id AND t.category_id=b.category_id AND t.kind='expense' AND substr(t.tx_date,1,7)=b.month),0) spent FROM budgets b JOIN categories ca ON ca.id=b.category_id WHERE b.user_id=? AND b.month=? ORDER BY ca.name""",(uid(),month)).fetchall()
-    return page(BUDGETS,title="Ngân sách",month=month,rows=rows,cats=[x for x in categories() if x["kind"]=="expense"],prev_month=shift_month(month,-1),next_month=shift_month(month,1))
+    bv=budget_view(rows)
+    return page(BUDGETS,title="Ngân sách",month=month,items=bv["items"],total=bv["total"],over=bv["over"],warn=bv["warn"],edit=edit,
+                cats=[x for x in categories() if x["kind"]=="expense"],prev_month=shift_month(month,-1),next_month=shift_month(month,1))
+
+@app.route("/budgets/copy",methods=["POST"])
+@login_required
+def budget_copy():
+    month=month_arg(request.form.get("month",""))
+    prev=shift_month(month,-1)
+    with db() as c:
+        had=c.execute("SELECT COUNT(*) FROM budgets WHERE user_id=? AND month=?",(uid(),prev)).fetchone()[0]
+        n=c.execute("INSERT INTO budgets(month,category_id,limit_amount,user_id) SELECT ?,category_id,limit_amount,user_id FROM budgets WHERE user_id=? AND month=? ON CONFLICT(user_id,month,category_id) DO NOTHING",(month,uid(),prev)).rowcount
+    if not had: flash(f"Tháng {vmonth(prev)} chưa có ngân sách nào để sao chép.","error")
+    elif n<=0: flash(f"Các ngân sách của tháng {vmonth(prev)} đã có đủ ở tháng này.","success")
+    else: flash(f"Đã sao chép {n} ngân sách từ tháng {vmonth(prev)}.","success")
+    return redirect(url_for("budget_page",month=month))
 
 @app.route("/budgets/<int:bid>/delete",methods=["POST"])
 @login_required
@@ -666,22 +844,21 @@ def budget_delete(bid):
     with db() as c: c.execute("DELETE FROM budgets WHERE id=? AND user_id=?",(bid,uid()))
     flash("Đã xóa ngân sách.","success"); return redirect(url_for("budget_page"))
 
+def csv_safe(v):
+    """Ô bắt đầu bằng = + - @ có thể bị Excel hiểu là công thức; thêm dấu nháy để luôn là văn bản."""
+    v = "" if v is None else str(v)
+    return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
+
 @app.route("/export.csv")
 @login_required
 def export_csv():
-    month=request.args.get("month",""); kind=request.args.get("kind",""); cat=request.args.get("category_id",""); q=request.args.get("q","").strip()
-    sql="SELECT t.tx_date,t.kind,t.amount,ca.name category,t.note FROM transactions t JOIN categories ca ON ca.id=t.category_id WHERE t.user_id=?"; params=[uid()]
-    if month:
-        try: datetime.strptime(month,"%Y-%m"); sql+=" AND substr(t.tx_date,1,7)=?"; params.append(month)
-        except ValueError: pass
-    if kind in ("income","expense"): sql+=" AND t.kind=?"; params.append(kind)
-    if cat.isdigit(): sql+=" AND t.category_id=?"; params.append(int(cat))
-    if q: sql+=" AND t.note LIKE ?"; params.append("%"+q+"%")
-    sql+=" ORDER BY t.tx_date DESC,t.id DESC"
-    with db() as c: rows=c.execute(sql,params).fetchall()
+    f = parse_filters(request.args); where, params = filter_sql(f, uid())
+    with db() as c:
+        rows = c.execute(f"SELECT t.tx_date,t.kind,t.amount,ca.name category,t.note {TX_FROM} WHERE {where} ORDER BY {SORTS[f['sort']]}", params).fetchall()
     out=io.StringIO(); w=csv.writer(out); w.writerow(["Ngày","Loại","Số tiền (VND)","Danh mục","Ghi chú"])
-    for r in rows: w.writerow([r["tx_date"],"Thu" if r["kind"]=="income" else "Chi",r["amount"],r["category"],r["note"]])
-    return Response("\ufeff"+out.getvalue(),content_type="text/csv; charset=utf-8",headers={"Content-Disposition":f"attachment; filename=giao_dich_{month or 'tat_ca'}.csv"})
+    for r in rows: w.writerow([r["tx_date"],"Thu" if r["kind"]=="income" else "Chi",r["amount"],csv_safe(r["category"]),csv_safe(r["note"])])
+    name = f"{f['date_from'] or 'dau'}_{f['date_to'] or 'nay'}" if (f["date_from"] or f["date_to"]) else "tat_ca"
+    return Response("\ufeff"+out.getvalue(),content_type="text/csv; charset=utf-8",headers={"Content-Disposition":f"attachment; filename=giao_dich_{name}.csv"})
 
 @app.route("/health")
 def health(): return {"status":"ok"}
