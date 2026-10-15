@@ -673,6 +673,374 @@ class TestChiTieuThongMinh(unittest.TestCase):
         # Người dùng khác chưa có ngân sách nên không sao chép được từ dữ liệu của mình
         self.assertIn("chưa có ngân sách nào để sao chép", other.post("/budgets/copy", data={"month": nxt}, follow_redirects=True).get_data(as_text=True))
 
+    def test_15_savings_goals(self):
+        """15. Mục tiêu tiết kiệm: tạo, nạp/rút, phần trăm, thời hạn, đã đạt, cách ly dữ liệu"""
+        from datetime import date, timedelta
+        c = app.app.test_client()
+        anon = app.app.test_client()
+        self.assertEqual(anon.get("/goals").status_code, 302)
+        register(c, "goals@example.com", "matkhau-goals-1")
+        today = date.today()
+        def iso(days): return (today + timedelta(days=days)).isoformat()
+        def create(**over):
+            data = {"name": "Du lịch Đà Lạt", "kind": "travel", "target_amount": "10.000.000", "deadline": iso(90), "saved_amount": "2500000"}
+            data.update(over)
+            return c.post("/goals/new", data=data, follow_redirects=True).get_data(as_text=True)
+
+        # Kiểm tra dữ liệu không hợp lệ
+        for bad in ({"name": ""}, {"kind": "khong-co"}, {"target_amount": "0"}, {"target_amount": "abc"},
+                    {"deadline": "2020-01-01"}, {"deadline": "khong-phai-ngay"}, {"saved_amount": "-5"},
+                    {"target_amount": "99999999999999999999"}):
+            self.assertIn("Dữ liệu không hợp lệ", create(**bad), bad)
+        with app.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM goals").fetchone()[0], 0)
+
+        # Tạo mục tiêu: 25%, còn thiếu 7.500.000, 90 ngày -> 3 tháng -> 2.500.000 mỗi tháng
+        html = create()
+        self.assertIn("Đã tạo mục tiêu tiết kiệm", html)
+        self.assertIn("25% hoàn thành", html)
+        self.assertIn("2.500.000 đ", html)
+        self.assertIn("Còn thiếu", html)
+        with app.db() as conn:
+            g = conn.execute("SELECT id FROM goals").fetchone(); gid = g["id"]
+            self.assertEqual(conn.execute("SELECT amount FROM goal_deposits WHERE goal_id=?", (gid,)).fetchone()["amount"], 2500000)
+        lst = c.get("/goals").get_data(as_text=True)
+        self.assertIn("Du lịch Đà Lạt", lst)
+        self.assertIn(">25%<", lst)
+        self.assertIn("Còn thiếu 7.500.000 đ, cần tiết kiệm khoảng 2.500.000 đ mỗi tháng", lst)
+        self.assertIn("còn 3 tháng", lst)
+        self.assertIn("Bạn đã tiết kiệm", lst)
+
+        # Nạp / rút
+        def deposit(amount, direction="add", d=None, note=""):
+            data = {"amount": str(amount), "direction": direction, "note": note}
+            if d: data["dep_date"] = d
+            return c.post(f"/goals/{gid}/deposit", data=data, follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Số tiền rút vượt quá số đã tích lũy", deposit("20000000", "withdraw"))
+        self.assertIn("Dữ liệu không hợp lệ", deposit("0"))
+        self.assertIn("Dữ liệu không hợp lệ", deposit("1000", d=iso(5)))             # ngày ở tương lai
+        self.assertIn("Dữ liệu không hợp lệ", deposit("1000", direction="xoa-het"))
+        done = deposit("7.500.000", note="Thưởng quý")
+        self.assertIn("Chúc mừng", done)
+        self.assertIn("Đăng xuất", done)       # trang chi tiết vẫn có thanh điều hướng của người đã đăng nhập
+        self.assertNotIn(">Đăng ký<", done)
+        self.assertIn("100% hoàn thành", done)
+        self.assertIn("Thưởng quý", done)
+        self.assertIn("Đã hoàn thành", done)
+        self.assertIn("(1)", c.get("/goals?status=done").get_data(as_text=True))     # tab Đã đạt có 1
+        self.assertIn("Du lịch Đà Lạt", c.get("/goals?status=done").get_data(as_text=True))
+        self.assertNotIn("Du lịch Đà Lạt", c.get("/goals?status=active").get_data(as_text=True))
+        # Rút bớt: không còn đạt mục tiêu
+        w = deposit("1000000", "withdraw", note="Đặt cọc")
+        self.assertIn("90% hoàn thành", w)
+        self.assertNotIn("Chúc mừng", w)
+        self.assertIn("Du lịch Đà Lạt", c.get("/goals?status=active").get_data(as_text=True))
+        # Nạp thêm vượt mục tiêu vẫn tính là đã đạt, thanh không vượt 100%
+        over = deposit("3000000")
+        self.assertIn("100% hoàn thành", over)
+        self.assertIn("width:100%", over)
+        self.assertNotIn("width:130", over)
+
+        # Xóa một khoản nạp
+        with app.db() as conn:
+            deps = conn.execute("SELECT id,amount FROM goal_deposits WHERE goal_id=? ORDER BY id", (gid,)).fetchall()
+        first_dep = deps[0]["id"]                                                      # 2.500.000 ban đầu
+        r = c.post(f"/goals/{gid}/deposits/{first_dep}/delete", follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Đã xóa khoản này", r)
+        with app.db() as conn:
+            saved = conn.execute("SELECT SUM(amount) FROM goal_deposits WHERE goal_id=?", (gid,)).fetchone()[0]
+        self.assertEqual(saved, 7500000 + 0 + 3000000 - 1000000)
+        self.assertEqual(c.post(f"/goals/{gid}/deposits/99999/delete", follow_redirects=True).status_code, 200)
+
+        # Sửa mục tiêu
+        edit_page = c.get(f"/goals/{gid}/edit").get_data(as_text=True)
+        self.assertIn("SỬA MỤC TIÊU", edit_page)
+        self.assertNotIn("Đã tích lũy (VND)", edit_page)
+        self.assertIn("Đã cập nhật mục tiêu", c.post(f"/goals/{gid}/edit", data={"name": "Du lịch Nhật", "kind": "travel",
+                      "target_amount": "20000000", "deadline": iso(200)}, follow_redirects=True).get_data(as_text=True))
+        self.assertIn("Du lịch Nhật", c.get("/goals").get_data(as_text=True))
+        self.assertIn("Dữ liệu không hợp lệ", c.post(f"/goals/{gid}/edit", data={"name": "X", "kind": "travel", "target_amount": "-1",
+                      "deadline": iso(10)}, follow_redirects=True).get_data(as_text=True))
+
+        # Quá hạn: chèn trực tiếp mục tiêu có hạn đã qua
+        with app.db() as conn:
+            uid_ = conn.execute("SELECT id FROM users WHERE email='goals@example.com'").fetchone()["id"]
+            od = conn.execute("INSERT INTO goals(user_id,name,kind,target_amount,deadline) VALUES(?,?,?,?,?)", (uid_, "Mua laptop", "shopping", 20000000, iso(-3))).lastrowid
+            conn.execute("INSERT INTO goal_deposits(goal_id,user_id,amount,dep_date,note) VALUES(?,?,?,?,?)", (od, uid_, 2000000, iso(-30), ""))
+        lst = c.get("/goals").get_data(as_text=True)
+        self.assertIn("đã quá hạn 3 ngày", lst)
+        self.assertIn(">10%<", lst)
+        # Dashboard hiện mục tiêu đang thực hiện
+        dash = c.get("/").get_data(as_text=True)
+        self.assertIn("Mục tiêu tiết kiệm", dash)
+        self.assertIn("Mua laptop", dash)
+
+        # Cách ly dữ liệu giữa người dùng
+        other = app.app.test_client()
+        register(other, "goals-other@example.com", "matkhau-goals-2")
+        self.assertNotIn("Du lịch Nhật", other.get("/goals").get_data(as_text=True))
+        self.assertIn("Không tìm thấy mục tiêu", other.get(f"/goals/{gid}", follow_redirects=True).get_data(as_text=True))
+        self.assertIn("Không tìm thấy mục tiêu", other.get(f"/goals/{gid}/edit", follow_redirects=True).get_data(as_text=True))
+        other.post(f"/goals/{gid}/deposit", data={"amount": "1000000", "direction": "add"})
+        other.post(f"/goals/{gid}/delete")
+        other.post(f"/goals/{gid}/deposits/{deps[1]['id']}/delete")
+        with app.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM goals WHERE id=?", (gid,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM goal_deposits WHERE goal_id=?", (gid,)).fetchone()[0], len(deps) - 1)
+
+        # Xóa mục tiêu: xóa luôn lịch sử nạp rút
+        self.assertIn("Đã xóa mục tiêu", c.post(f"/goals/{gid}/delete", follow_redirects=True).get_data(as_text=True))
+        with app.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM goals WHERE id=?", (gid,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM goal_deposits WHERE goal_id=?", (gid,)).fetchone()[0], 0)
+        self.assertEqual(anon.get(f"/goals/{od}").status_code, 302)
+
+    def test_16_recurring_transactions_and_reminders(self):
+        """16. Giao dịch định kỳ: ngày đến hạn, nhắc lịch, ghi nhận/bỏ qua, tự động, tạm dừng, lịch tháng, cách ly dữ liệu"""
+        from datetime import date, timedelta
+        nxt, add_m = app.next_occurrence, app.add_months
+
+        # --- Quy tắc tính ngày (không phụ thuộc ngày chạy test) ---
+        self.assertEqual(nxt(date(2028, 1, 31), "monthly", 31), date(2028, 2, 29))      # tháng ngắn: co lại
+        self.assertEqual(nxt(date(2028, 2, 29), "monthly", 31), date(2028, 3, 31))      # rồi trở lại ngày 31
+        self.assertEqual(nxt(date(2028, 2, 29), "yearly", 29), date(2029, 2, 28))       # 29/2 năm không nhuận
+        self.assertEqual(nxt(date(2031, 2, 28), "yearly", 29), date(2032, 2, 29))       # về lại 29/2 khi nhuận
+        self.assertEqual(nxt(date(2028, 12, 15), "monthly", 15), date(2029, 1, 15))     # qua năm
+        self.assertEqual(nxt(date(2028, 1, 3), "weekly", 3), date(2028, 1, 10))
+        mon = {"start_date": "2028-01-31", "frequency": "monthly", "anchor_day": 31, "end_date": None}
+        self.assertEqual(app.occurrences(mon, date(2028, 2, 1), date(2028, 4, 30)), [date(2028, 2, 29), date(2028, 3, 31), date(2028, 4, 30)])
+        wk = {"start_date": "2028-01-03", "frequency": "weekly", "anchor_day": 3, "end_date": "2028-02-01"}
+        self.assertEqual(app.occurrences(wk, date(2028, 1, 10), date(2028, 2, 10)), [date(2028, 1, 10), date(2028, 1, 17), date(2028, 1, 24), date(2028, 1, 31)])
+
+        c = app.app.test_client()
+        register(c, "rec@example.com", "matkhau-rec-123")
+        today = date.today()
+        with app.db() as conn:
+            cat = {r["name"]: r["id"] for r in conn.execute("SELECT id,name FROM categories")}
+            me = conn.execute("SELECT id FROM users WHERE email='rec@example.com'").fetchone()["id"]
+        def iso(days): return (today + timedelta(days=days)).isoformat()
+        def tx_count():
+            with app.db() as conn: return conn.execute("SELECT COUNT(*) FROM transactions WHERE user_id=?", (me,)).fetchone()[0]
+        def rec_row(name):
+            with app.db() as conn: return conn.execute("SELECT * FROM recurring WHERE note=? AND user_id=?", (name, me)).fetchone()
+        def create(**over):
+            data = {"kind": "expense", "note": "Tiền thuê nhà", "amount": "5.000.000", "category_id": str(cat["Nhà ở"]), "frequency": "monthly",
+                    "next_due": iso(2), "end_date": "", "remind_days": "3"}
+            data.update(over)
+            return c.post("/recurring/new", data=data, follow_redirects=True).get_data(as_text=True)
+
+        self.assertIn("THÊM KHOẢN ĐỊNH KỲ", c.get("/recurring/new").get_data(as_text=True))
+        self.assertIn("Chưa có khoản định kỳ nào", c.get("/recurring").get_data(as_text=True))
+
+        # --- Kiểm tra dữ liệu không hợp lệ ---
+        for bad in ({"note": ""}, {"kind": "khac"}, {"frequency": "moi-gio"}, {"amount": "0"}, {"amount": "abc"},
+                    {"category_id": str(cat["Lương"])},                      # danh mục thu nhưng khoản là chi
+                    {"next_due": iso(-1)}, {"next_due": "khong-phai-ngay"}, {"end_date": iso(-5)}, {"remind_days": "99"}, {"remind_days": "x"}):
+            self.assertIn("Dữ liệu không hợp lệ", create(**bad), bad)
+        with app.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM recurring WHERE user_id=?", (me,)).fetchone()[0], 0)
+
+        # --- Khoản chi nhắc (không tự động), đến hạn sau 2 ngày, nhắc trước 3 ngày ---
+        html = create()
+        self.assertIn("Đã thêm khoản định kỳ", html)
+        self.assertIn("Cần chú ý", html)
+        self.assertIn("Còn 2 ngày", html)
+        self.assertIn(">Ghi nhận<", html)
+        self.assertIn("Chi cố định mỗi tháng", html)
+        self.assertIn("5.000.000 đ", html)
+        r1 = rec_row("Tiền thuê nhà"); rid = r1["id"]
+        self.assertEqual((r1["start_date"], r1["next_due"], r1["anchor_day"], r1["auto"]), (iso(2), iso(2), today.__add__(timedelta(days=2)).day, 0))
+        dash = c.get("/").get_data(as_text=True)
+        self.assertIn("1 khoản định kỳ cần chú ý:", dash)
+        self.assertIn("Tiền thuê nhà (còn 2 ngày)", dash)
+        self.assertIn("Giao dịch định kỳ sắp đến hạn", dash)
+        before = tx_count()
+        # Ghi nhận: tạo giao dịch dated hôm nay (không ghi vào tương lai), chuyển kỳ tiếp theo
+        d0 = today + timedelta(days=2)
+        rec_html = c.post(f"/recurring/{rid}/record", follow_redirects=True).get_data(as_text=True)
+        self.assertIn('Đã ghi nhận &#34;Tiền thuê nhà&#34;', rec_html)
+        self.assertEqual(tx_count(), before + 1)
+        with app.db() as conn:
+            t = conn.execute("SELECT * FROM transactions WHERE user_id=? AND note='Tiền thuê nhà'", (me,)).fetchone()
+        self.assertEqual((t["kind"], t["amount"], t["tx_date"], t["category_id"]), ("expense", 5000000, today.isoformat(), cat["Nhà ở"]))
+        self.assertEqual(rec_row("Tiền thuê nhà")["next_due"], add_m(d0, 1, d0.day).isoformat())
+        # Bấm lại / gửi lại form: không tạo giao dịch trùng
+        again = c.post(f"/recurring/{rid}/record", follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Không thể ghi nhận khoản này", again)
+        self.assertIn("Không thể bỏ qua khoản này", c.post(f"/recurring/{rid}/skip", follow_redirects=True).get_data(as_text=True))
+        self.assertEqual(tx_count(), before + 1)
+
+        # --- Lịch tháng: kỳ đã xử lý có dấu hoàn thành, kỳ sắp tới hiện mốc sắp tới ---
+        cal_done = c.get(f"/recurring?month={d0.strftime('%Y-%m')}").get_data(as_text=True)
+        self.assertIn("chip-r expense done", cal_done)
+        self.assertIn("Đã xử lý", cal_done)
+        self.assertEqual(cal_done.count('class="cal-cell') % 7, 0)
+        nd = add_m(d0, 1, d0.day)
+        cal_next = c.get(f"/recurring?month={nd.strftime('%Y-%m')}").get_data(as_text=True)
+        self.assertIn("chip-r expense upcoming", cal_next)
+        self.assertIn("Sắp tới", cal_next)
+
+        # --- Khoản thu tự động đến hạn hôm nay: tự ghi nhận khi mở trang ---
+        before = tx_count()
+        create(kind="income", note="Lương tháng", amount="15000000", category_id=str(cat["Lương"]), next_due=iso(0), remind_days="0")
+        auto_html = c.get("/recurring").get_data(as_text=True)
+        self.assertEqual(tx_count(), before)                                     # chưa bật tự động -> chỉ nhắc
+        self.assertIn("Đến hạn hôm nay", auto_html)
+        with app.db() as conn: conn.execute("UPDATE recurring SET auto=1 WHERE note='Lương tháng' AND user_id=?", (me,))
+        auto_html = c.get("/transactions").get_data(as_text=True)               # mở danh sách giao dịch cũng kích hoạt
+        self.assertIn("Đã tự động ghi nhận 1 giao dịch định kỳ", auto_html)
+        self.assertEqual(tx_count(), before + 1)
+        with app.db() as conn:
+            t = conn.execute("SELECT * FROM transactions WHERE user_id=? AND note='Lương tháng'", (me,)).fetchone()
+        self.assertEqual((t["kind"], t["amount"], t["tx_date"]), ("income", 15000000, today.isoformat()))
+        self.assertEqual(rec_row("Lương tháng")["next_due"], add_m(today, 1, today.day).isoformat())
+        c.get("/recurring"); self.assertEqual(tx_count(), before + 1)             # tải lại không tạo thêm
+
+        # --- Ghi bù các kỳ bị lỡ khi chưa mở ứng dụng (khoản tự động) ---
+        before = tx_count()
+        start = add_m(today, -3, today.day)
+        with app.db() as conn:
+            conn.execute("INSERT INTO recurring(user_id,kind,amount,category_id,note,frequency,start_date,anchor_day,next_due,remind_days,auto,active) VALUES(?,?,?,?,?,?,?,?,?,?,1,1)",
+                         (me, "expense", 300000, cat["Hóa đơn"], "Gói internet", "monthly", start.isoformat(), today.day, start.isoformat(), 3))
+        self.assertIn("Đã tự động ghi nhận 4 giao dịch định kỳ", c.get("/").get_data(as_text=True))
+        with app.db() as conn:
+            dates = {r["tx_date"] for r in conn.execute("SELECT tx_date FROM transactions WHERE user_id=? AND note='Gói internet'", (me,))}
+        self.assertEqual(dates, {add_m(today, -k, today.day).isoformat() for k in range(4)})
+        self.assertEqual(rec_row("Gói internet")["next_due"], add_m(today, 1, today.day).isoformat())
+
+        # --- Bỏ qua một kỳ: không tạo giao dịch ---
+        create(note="Phí gửi xe", amount="100000", category_id=str(cat["Đi lại"]), frequency="weekly", next_due=iso(1))
+        before = tx_count()
+        sk = c.post(f"/recurring/{rec_row('Phí gửi xe')['id']}/skip", follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Đã bỏ qua kỳ", sk)
+        self.assertEqual(tx_count(), before)
+        self.assertEqual(rec_row("Phí gửi xe")["next_due"], iso(8))
+
+        # --- Tạm dừng: không tự ghi nhận; tiếp tục: bỏ qua các kỳ đã lỡ, không ghi bù ---
+        old = today - timedelta(days=40)
+        with app.db() as conn:
+            pid = conn.execute("INSERT INTO recurring(user_id,kind,amount,category_id,note,frequency,start_date,anchor_day,next_due,remind_days,auto,active) VALUES(?,?,?,?,?,?,?,?,?,?,1,0)",
+                               (me, "expense", 200000, cat["Giải trí"], "Gói xem phim", "monthly", old.isoformat(), old.day, old.isoformat(), 3)).lastrowid
+        before = tx_count()
+        c.get("/"); self.assertEqual(tx_count(), before)
+        self.assertIn("Tạm dừng", c.get("/recurring").get_data(as_text=True))
+        res = c.post(f"/recurring/{pid}/toggle", follow_redirects=True).get_data(as_text=True)
+        self.assertIn('Đã tiếp tục &#34;Gói xem phim&#34;', res)
+        resumed = date.fromisoformat(rec_row("Gói xem phim")["next_due"])
+        self.assertGreaterEqual(resumed, today)
+        self.assertLess(resumed, today + timedelta(days=32))
+        self.assertEqual(tx_count(), before + (1 if resumed == today else 0))     # không ghi bù các tháng đã lỡ
+        c.post(f"/recurring/{pid}/toggle")
+        self.assertEqual(rec_row("Gói xem phim")["active"], 0)
+
+        # --- Có ngày kết thúc: ghi nhận kỳ cuối rồi kết thúc ---
+        create(note="Học phí khóa học", amount="2000000", category_id=str(cat["Chi phí khác"]), next_due=iso(0), end_date=iso(0), remind_days="0")
+        eid = rec_row("Học phí khóa học")["id"]
+        self.assertIn('Đã ghi nhận &#34;Học phí khóa học&#34;', c.post(f"/recurring/{eid}/record", follow_redirects=True).get_data(as_text=True))
+        page_end = c.get("/recurring").get_data(as_text=True)
+        self.assertIn("Đã kết thúc", page_end)
+        self.assertIn("Không thể ghi nhận khoản này", c.post(f"/recurring/{eid}/record", follow_redirects=True).get_data(as_text=True))
+
+        # --- Sửa ---
+        self.assertIn("SỬA KHOẢN ĐỊNH KỲ", c.get(f"/recurring/{rid}/edit").get_data(as_text=True))
+        cur = rec_row("Tiền thuê nhà")
+        ok = c.post(f"/recurring/{rid}/edit", data={"kind": "expense", "note": "Tiền thuê nhà", "amount": "5.500.000", "category_id": str(cat["Nhà ở"]),
+                    "frequency": "monthly", "next_due": cur["next_due"], "end_date": "", "remind_days": "7", "auto": "1"}, follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Đã cập nhật khoản định kỳ", ok)
+        upd = rec_row("Tiền thuê nhà")
+        self.assertEqual((upd["amount"], upd["remind_days"], upd["auto"], upd["start_date"]), (5500000, 7, 1, cur["start_date"]))   # giữ nguyên ngày gốc
+        new_due = date.fromisoformat(iso(45))
+        c.post(f"/recurring/{rid}/edit", data={"kind": "expense", "note": "Tiền thuê nhà", "amount": "5500000", "category_id": str(cat["Nhà ở"]),
+               "frequency": "monthly", "next_due": new_due.isoformat(), "end_date": "", "remind_days": "7"})
+        upd = rec_row("Tiền thuê nhà")
+        self.assertEqual((upd["start_date"], upd["anchor_day"], upd["next_due"], upd["auto"]), (new_due.isoformat(), new_due.day, new_due.isoformat(), 0))
+        self.assertIn("Dữ liệu không hợp lệ", c.post(f"/recurring/{rid}/edit", data={"kind": "income", "note": "x", "amount": "1000", "category_id": str(cat["Nhà ở"]),
+                      "frequency": "monthly", "next_due": iso(5), "remind_days": "3"}, follow_redirects=True).get_data(as_text=True))
+
+        # --- Cách ly dữ liệu giữa người dùng ---
+        other = app.app.test_client()
+        register(other, "rec-other@example.com", "matkhau-rec-456")
+        self.assertIn("Chưa có khoản định kỳ nào", other.get("/recurring").get_data(as_text=True))
+        self.assertNotIn("Tiền thuê nhà", other.get("/").get_data(as_text=True))
+        sid = rec_row("Phí gửi xe")["id"]
+        with app.db() as conn: conn.execute("UPDATE recurring SET next_due=? WHERE id=?", (iso(0), sid))
+        snapshot = dict(rec_row("Phí gửi xe")); before = tx_count()
+        for path in (f"/recurring/{sid}/record", f"/recurring/{sid}/skip", f"/recurring/{sid}/toggle", f"/recurring/{sid}/delete"):
+            other.post(path)
+        self.assertIn("Không tìm thấy khoản định kỳ", other.get(f"/recurring/{sid}/edit", follow_redirects=True).get_data(as_text=True))
+        other.post(f"/recurring/{sid}/edit", data={"kind": "expense", "note": "bị sửa", "amount": "1", "category_id": str(cat["Đi lại"]), "frequency": "weekly", "next_due": iso(3), "remind_days": "3"})
+        self.assertEqual(dict(rec_row("Phí gửi xe")), snapshot)
+        self.assertEqual(tx_count(), before)
+
+        # --- Xóa khoản định kỳ: giữ lại các giao dịch đã ghi nhận ---
+        before = tx_count()
+        self.assertIn("Đã xóa khoản định kỳ", c.post(f"/recurring/{rid}/delete", follow_redirects=True).get_data(as_text=True))
+        self.assertIsNone(rec_row("Tiền thuê nhà"))
+        self.assertEqual(tx_count(), before)
+        self.assertEqual(app.app.test_client().get("/recurring").status_code, 302)
+
+    def test_17_server_side_storage_and_schema_file(self):
+        """17. Dữ liệu lưu ở CSDL máy chủ (không localStorage/fetch) và schema.sql là nguồn cấu trúc duy nhất"""
+        schema_path = BASE_DIR / "schema.sql"
+        self.assertTrue(schema_path.exists(), "schema.sql phải nằm cạnh app.py")
+        self.assertEqual(app.SCHEMA_FILE, schema_path)
+        sql = schema_path.read_text(encoding="utf-8")
+        declared_tables = set(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", sql))
+        declared_indexes = set(re.findall(r"CREATE INDEX IF NOT EXISTS (\w+)", sql))
+        self.assertEqual(declared_tables, {"users", "categories", "transactions", "budgets", "goals", "goal_deposits", "recurring"})
+
+        previous, tmp, extra = app.DB, BASE_DIR / "test_schema_tmp.db", BASE_DIR / "test_schema_extra.sql"
+        for f in (tmp, extra):
+            if f.exists(): f.unlink()
+        try:
+            # 1. CSDL mới được tạo đúng từ schema.sql: đủ bảng, đủ chỉ mục, đủ 11 danh mục mặc định
+            app.DB = tmp
+            app.init_db()
+            with app.db() as c:
+                tables = {r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+                indexes = {r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'")}
+                self.assertEqual(tables, declared_tables)
+                self.assertTrue(declared_indexes <= indexes)
+                self.assertEqual(c.execute("SELECT COUNT(*) FROM categories").fetchone()[0], 11)
+                # 2. Tên trường nhất quán: snake_case, không còn kiểu categoryId / createdAt / limit
+                for t in tables:
+                    for col in c.execute(f"PRAGMA table_info({t})"):
+                        self.assertRegex(col["name"], r"^[a-z][a-z0-9_]*$", f"{t}.{col['name']}")
+                budget_cols = {r["name"] for r in c.execute("PRAGMA table_info(budgets)")}
+                self.assertTrue({"category_id", "limit_amount", "user_id"} <= budget_cols)
+                self.assertIn("created_at", {r["name"] for r in c.execute("PRAGMA table_info(users)")})
+            # 3. Chạy lại không mất dữ liệu và không nhồi lại danh mục đã xóa
+            with app.db() as c: c.execute("DELETE FROM categories WHERE name='Chi phí khác'")
+            app.init_db(); app.init_db()
+            with app.db() as c: self.assertEqual(c.execute("SELECT COUNT(*) FROM categories").fetchone()[0], 10)
+
+            # 4. Mã thật sự ĐỌC schema.sql: đổi file thì cấu trúc đổi theo
+            extra.write_text(sql + "\nCREATE TABLE IF NOT EXISTS kiem_tra_doc_file(id INTEGER PRIMARY KEY);\n", encoding="utf-8")
+            app.SCHEMA_FILE = extra
+            app.init_db()
+            with app.db() as c:
+                self.assertIsNotNone(c.execute("SELECT 1 FROM sqlite_master WHERE name='kiem_tra_doc_file'").fetchone())
+            # 5. Thiếu schema.sql: báo lỗi rõ ràng thay vì chạy với cấu trúc không xác định
+            app.SCHEMA_FILE = BASE_DIR / "khong_ton_tai.sql"
+            with self.assertRaises(RuntimeError) as ctx: app.init_db()
+            self.assertIn("schema.sql", str(ctx.exception))
+        finally:
+            app.SCHEMA_FILE = schema_path
+            app.DB = previous
+            for f in (tmp, extra):
+                try: f.unlink()
+                except Exception: pass
+
+        # 6. Không có lưu trữ phía trình duyệt hay gọi fetch/XHR trong các trang đã đăng nhập; dữ liệu nằm trong SQLite
+        for path in ("/", "/transactions", "/transactions/new", "/budgets", "/goals", "/recurring", "/recurring/new"):
+            res = self.client.get(path)
+            self.assertEqual(res.status_code, 200, path)
+            html = res.get_data(as_text=True)
+            for banned in ("localStorage", "sessionStorage", "indexedDB", "fetch(", "XMLHttpRequest"):
+                self.assertNotIn(banned, html, f"{banned} xuất hiện ở {path}")
+        with app.db() as c:
+            self.assertGreater(c.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
