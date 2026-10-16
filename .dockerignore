@@ -1,0 +1,6 @@
+.venv
+__pycache__
+*.db
+test_app.py
+README.md
+index.html
