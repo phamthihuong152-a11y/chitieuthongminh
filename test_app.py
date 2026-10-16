@@ -1020,10 +1020,21 @@ class TestChiTieuThongMinh(unittest.TestCase):
             app.init_db()
             with app.db() as c:
                 self.assertIsNotNone(c.execute("SELECT 1 FROM sqlite_master WHERE name='kiem_tra_doc_file'").fetchone())
-            # 5. Thiếu schema.sql: báo lỗi rõ ràng thay vì chạy với cấu trúc không xác định
+            # 5. Thiếu schema.sql (ví dụ Dockerfile quên copy): không sập, dùng bản sao dự phòng và cảnh báo ra stderr
+            import contextlib, io
             app.SCHEMA_FILE = BASE_DIR / "khong_ton_tai.sql"
-            with self.assertRaises(RuntimeError) as ctx: app.init_db()
-            self.assertIn("schema.sql", str(ctx.exception))
+            fresh = BASE_DIR / "test_schema_tmp2.db"
+            if fresh.exists(): fresh.unlink()
+            app.DB = fresh
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err): app.init_db()
+            self.assertIn("schema.sql", err.getvalue())
+            with app.db() as c:
+                self.assertEqual({r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}, declared_tables)
+                self.assertEqual(c.execute("SELECT COUNT(*) FROM categories").fetchone()[0], 11)
+            fresh.unlink()
+            # 6. Bản sao dự phòng luôn trùng khớp schema.sql (nếu lệch, hãy chép lại nội dung schema.sql vào EMBEDDED_SCHEMA)
+            self.assertEqual(app.EMBEDDED_SCHEMA, sql)
         finally:
             app.SCHEMA_FILE = schema_path
             app.DB = previous
@@ -1031,7 +1042,7 @@ class TestChiTieuThongMinh(unittest.TestCase):
                 try: f.unlink()
                 except Exception: pass
 
-        # 6. Không có lưu trữ phía trình duyệt hay gọi fetch/XHR trong các trang đã đăng nhập; dữ liệu nằm trong SQLite
+        # 7. Không có lưu trữ phía trình duyệt hay gọi fetch/XHR trong các trang đã đăng nhập; dữ liệu nằm trong SQLite
         for path in ("/", "/transactions", "/transactions/new", "/budgets", "/goals", "/recurring", "/recurring/new"):
             res = self.client.get(path)
             self.assertEqual(res.status_code, 200, path)
