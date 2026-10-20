@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, flash, Response, render_template_string, session, g
+from flask import Flask, request, redirect, url_for, flash, Response, render_template_string, session, g, jsonify
 import os, re, sys, hmac, time, secrets, sqlite3, csv, io, calendar, math
 from contextlib import contextmanager
 from functools import wraps
@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
+app.json.ensure_ascii = False
 DB = Path(os.environ.get("DB_PATH", Path(__file__).with_name("chi_tieu.db")))
 
 def load_secret_key():
@@ -206,6 +207,42 @@ app.jinja_env.globals["cat_color"] = cat_color
 
 BASE = r"""
 <!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#A61E4D">
+{% if g.user %}<meta name="csrf-token" content="{{ csrf_token() }}">
+<script>
+/* Gọi API JSON của máy chủ bằng fetch. Mọi thao tác thay đổi dữ liệu kèm mã CSRF; lỗi từ máy chủ được hiện cho người dùng. */
+async function api(method,url,body){
+  var o={method:method,credentials:'same-origin',headers:{'Accept':'application/json'}};
+  if(method!=='GET'){o.headers['X-CSRF-Token']=document.querySelector('meta[name=csrf-token]').content;o.headers['X-Flash']='1'}
+  if(body!==undefined){o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
+  var r;try{r=await fetch(url,o)}catch(e){throw new Error('Không kết nối được máy chủ')}
+  var d=null;try{d=await r.json()}catch(e){}
+  if(r.status===401){location.href='/login';throw new Error('Phiên đăng nhập đã hết hạn')}
+  if(!r.ok)throw new Error((d&&d.error)||('Lỗi máy chủ ('+r.status+')'));
+  return d;
+}
+/* Form có data-save-api: gửi JSON tới API rồi chuyển trang; form có data-delete-api: hỏi xác nhận, gọi DELETE rồi tải lại trang. */
+document.addEventListener('submit',async function(e){
+  var f=e.target;
+  if(f.matches&&f.matches('form[data-delete-api]')){
+    e.preventDefault();
+    if(!confirm(f.dataset.confirm||'Xóa mục này?'))return;
+    try{await api('DELETE',f.dataset.deleteApi);location.reload()}catch(ex){alert(ex.message)}
+    return;
+  }
+  if(f.matches&&f.matches('form[data-save-api]')){
+    e.preventDefault();
+    var box=f.querySelector('.js-form-error');
+    if(!box){box=document.createElement('div');box.className='flash error js-form-error';box.setAttribute('role','alert');box.hidden=true;f.insertBefore(box,f.firstChild)}
+    box.hidden=true;
+    var btn=f.querySelector('button:not([type=button]):not(.light)');if(btn)btn.disabled=true;
+    var d={};new FormData(f).forEach(function(v,k){if(k!=='csrf')d[k]=v});
+    try{
+      await api(f.dataset.method||'POST',f.dataset.saveApi,d);
+      location.href=(f.dataset.back||'/').replace('{month}',encodeURIComponent(d.month||''));
+    }catch(ex){box.textContent=ex.message;box.hidden=false;if(btn)btn.disabled=false;box.scrollIntoView({block:'center'})}
+  }
+});
+</script>{% endif %}
 <title>{{ title or 'Chi Tiêu Thông Minh' }}</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23D6336C'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='white' font-family='Arial'%3E%E2%82%AB%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -455,8 +492,7 @@ DASH = r"""{% extends base %}{% block body %}
 <div class="panel-h"><div><h2 id="ch-title">Thu chi theo thời gian</h2><div class="muted small" id="chart-period"></div></div>
 <div class="tabs2" role="group" aria-label="Chọn khoảng thời gian"><button type="button" data-mode="day" aria-pressed="true">Ngày</button><button type="button" data-mode="month" aria-pressed="false">Tháng</button><button type="button" data-mode="year" aria-pressed="false">Năm</button></div></div>
 <div class="chart-top"><div class="lg"><span><i class="sw bi"></i>Thu</span><span><i class="sw be"></i>Chi</span></div><div class="chart-sum"><span>Thu <b class="num in" id="cs-in"></b></span><span>Chi <b class="num out" id="cs-out"></b></span></div></div>
-<div class="chart-wrap"><div class="chart" id="chart"></div><div class="tip" id="chart-tip" hidden></div></div>
-<script type="application/json" id="chart-data">{{ chart|tojson }}</script>
+<div class="chart-wrap"><div class="chart" id="chart" data-month="{{ month }}"></div><div class="tip" id="chart-tip" hidden></div></div>
 </section>
 <div class="cols">
 <section class="panel"><div class="panel-h"><h2>Chi tiêu theo danh mục</h2></div>
@@ -476,12 +512,13 @@ DASH = r"""{% extends base %}{% block body %}
 <section class="panel" style="margin-top:18px"><div class="panel-h"><h2>Giao dịch gần đây</h2><a class="link" href="/transactions?month={{ month }}">Xem tất cả</a></div>
 {% if recent %}<ul class="txs">{% for t in recent %}<li class="tx"><span class="ico" style="--c:{{ cat_color(t.category_id) }}" aria-hidden="true">{{ t.category|first|upper }}</span><div class="tx-main"><b>{{ t.note or t.category }}</b><div class="tx-meta"><span>{{ t.category }}</span><span>{{ t.tx_date|vdate }}</span></div></div><span class="tx-amt {{ 'in' if t.kind=='income' else 'out' }}">{{ '+' if t.kind=='income' else '−' }}{{ t.amount|money }}</span><div class="actions"><a class="link" href="/transactions/{{ t.id }}/edit">Sửa</a></div></li>{% endfor %}</ul>
 {% else %}<div class="empty">Chưa có giao dịch nào.<br><a class="btn" href="/transactions/new">Thêm giao dịch đầu tiên</a></div>{% endif %}</section><script>(function(){
-var data=JSON.parse(document.getElementById('chart-data').textContent),box=document.getElementById('chart'),tip=document.getElementById('chart-tip'),mode='day',layout=null,lh=280;
+var data=null,box=document.getElementById('chart'),tip=document.getElementById('chart-tip'),mode='day',layout=null,lh=280;
 function vnd(v){return Number(v).toLocaleString('vi-VN')+' đ'}
 function short(v){if(v>=1e9)return String(+(v/1e9).toFixed(1)).replace('.',',')+' tỷ';if(v>=1e6)return String(+(v/1e6).toFixed(1)).replace('.',',')+' tr';if(v>=1e3)return Math.round(v/1e3)+'k';return String(Math.round(v))}
 function nice(m){var raw=m/4,p=Math.pow(10,Math.floor(Math.log(raw)/Math.LN10)),n=raw/p,c=[1,1.5,2,2.5,3,4,5,6,8,10];for(var i=0;i<c.length;i++){if(n<=c[i]+1e-9)return c[i]*p*4}return 40*p}
 function sum(a){return a.reduce(function(x,y){return x+y},0)}
 function draw(){
+ if(!data)return;
  var d=data[mode],n=d.labels.length,w=box.clientWidth||320,h=w<520?220:280;lh=h;var pl=46,pr=8,pt=10,pb=26,pw=w-pl-pr,ph=h-pt-pb;
  document.getElementById('chart-period').textContent=d.period;
  document.getElementById('cs-in').textContent=vnd(sum(d.income));document.getElementById('cs-out').textContent=vnd(sum(d.expense));
@@ -514,7 +551,13 @@ box.addEventListener('pointerleave',function(e){if(e.pointerType==='mouse')hide(
 document.addEventListener('pointerdown',function(e){if(!box.contains(e.target))hide()});
 [].forEach.call(document.querySelectorAll('.tabs2 button'),function(b){b.addEventListener('click',function(){mode=b.getAttribute('data-mode');[].forEach.call(document.querySelectorAll('.tabs2 button'),function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});draw()})});
 if(window.ResizeObserver){new ResizeObserver(draw).observe(box)}else{window.addEventListener('resize',draw)}
-draw();
+function load(){
+ box.innerHTML='<div class="empty">Đang tải biểu đồ...</div>';
+ api('GET','/api/chart?month='+encodeURIComponent(box.dataset.month)).then(function(d){data=d;draw()}).catch(function(e){
+  box.innerHTML='<div class="empty"></div>';var m=box.firstChild;m.textContent=e.message+' ';
+  var b=document.createElement('button');b.type='button';b.className='btn light sm';b.textContent='Thử lại';b.onclick=load;m.appendChild(b)});
+}
+load();
 })();</script>{% endblock %}"""
 
 LIST = r"""{% extends base %}{% block body %}
@@ -531,7 +574,7 @@ LIST = r"""{% extends base %}{% block body %}
 <div class="f-actions"><button class="btn">Lọc</button><a class="btn light" href="{{ clear_url }}">Xóa lọc</a></div></div></form>
 {% if chips %}<div class="chips-active"><span class="muted small">Đang lọc:</span>{% for c in chips %}<a class="chip-x" href="{{ c.url }}" aria-label="Bỏ lọc {{ c.label }}">{{ c.label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></a>{% endfor %}<a class="link small" href="{{ clear_url }}">Xóa tất cả</a></div>{% endif %}
 <section class="panel"><div class="sum"><span class="muted">{{ total }} giao dịch{% if total %}, đang xem {{ start }} đến {{ end }}{% endif %}</span><span class="in num">Thu +{{ tot_in|money }}</span><span class="out num">Chi −{{ tot_out|money }}</span></div>
-{% if rows %}<ul class="txs">{% for t in rows %}<li class="tx"><span class="ico" style="--c:{{ cat_color(t.category_id) }}" aria-hidden="true">{{ t.category|first|upper }}</span><div class="tx-main"><b>{{ t.note or t.category }}</b><div class="tx-meta"><span>{{ t.category }}</span><span>{{ t.tx_date|vdate }}</span></div></div><span class="tx-amt {{ 'in' if t.kind=='income' else 'out' }}">{{ '+' if t.kind=='income' else '−' }}{{ t.amount|money }}</span><div class="actions"><a class="btn light sm" href="/transactions/{{ t.id }}/edit?next={{ back|urlencode }}">Sửa</a><form method="post" action="/transactions/{{ t.id }}/delete" onsubmit="return confirm('Xóa giao dịch này?')"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ back }}"><button class="btn danger sm">Xóa</button></form></div></li>{% endfor %}</ul>
+{% if rows %}<ul class="txs">{% for t in rows %}<li class="tx"><span class="ico" style="--c:{{ cat_color(t.category_id) }}" aria-hidden="true">{{ t.category|first|upper }}</span><div class="tx-main"><b>{{ t.note or t.category }}</b><div class="tx-meta"><span>{{ t.category }}</span><span>{{ t.tx_date|vdate }}</span></div></div><span class="tx-amt {{ 'in' if t.kind=='income' else 'out' }}">{{ '+' if t.kind=='income' else '−' }}{{ t.amount|money }}</span><div class="actions"><a class="btn light sm" href="/transactions/{{ t.id }}/edit?next={{ back|urlencode }}">Sửa</a><form method="post" action="/transactions/{{ t.id }}/delete" data-delete-api="/api/transactions/{{ t.id }}" data-confirm="Xóa giao dịch này?"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ back }}"><button class="btn danger sm">Xóa</button></form></div></li>{% endfor %}</ul>
 {% if pages>1 %}<nav class="pager" aria-label="Phân trang">{% if page_no>1 %}<a class="pg" href="{{ prev_url }}">Trước</a>{% endif %}{% for it in page_items %}{% if it.gap %}<span class="pg gap">…</span>{% else %}<a class="pg{{ ' on' if it.current }}" href="{{ it.url }}"{% if it.current %} aria-current="page"{% endif %}>{{ it.n }}</a>{% endif %}{% endfor %}{% if page_no<pages %}<a class="pg" href="{{ next_url }}">Sau</a>{% endif %}</nav>{% endif %}
 {% elif chips %}<div class="empty">Không có giao dịch nào khớp bộ lọc.<br><a class="btn light" href="{{ clear_url }}">Xóa bộ lọc</a></div>
 {% else %}<div class="empty">Chưa có giao dịch nào.<br><a class="btn" href="/transactions/new">Thêm giao dịch đầu tiên</a></div>{% endif %}</section>{% endblock %}"""
@@ -539,7 +582,7 @@ LIST = r"""{% extends base %}{% block body %}
 FORM = r"""{% extends base %}{% block body %}
 <nav class="crumbs" aria-label="Đường dẫn"><a href="{{ back_url }}">Giao dịch</a><span aria-hidden="true">/</span><span aria-current="page">{{ 'Sửa giao dịch' if row else 'Thêm giao dịch mới' }}</span></nav>
 <div class="head head-form"><div><h1 class="caps">{{ 'SỬA GIAO DỊCH' if row else 'THÊM GIAO DỊCH MỚI' }}</h1><p class="muted lead">{{ 'Cập nhật thông tin khoản thu hoặc chi này.' if row else 'Ghi nhận khoản thu và chi để theo dõi dòng tiền, kiểm soát ngân sách và quản lý tài chính hiệu quả hơn.' }}</p></div><a class="btn light" href="{{ back_url }}">Quay lại</a></div>
-<form class="panel formcard" method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<form class="panel formcard" method="post" data-save-api="{{ '/api/transactions/%d'|format(row.id) if row else '/api/transactions' }}" data-method="{{ 'PUT' if row else 'POST' }}" data-back="{{ back_url }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 <div class="field"><div class="seg2" role="radiogroup" aria-label="Loại giao dịch"><label><input type="radio" name="kind" value="expense" {{ 'checked' if not row or row.kind=='expense' }}><span>Chi tiêu</span></label><label><input type="radio" name="kind" value="income" {{ 'checked' if row and row.kind=='income' }}><span>Thu nhập</span></label></div></div>
 <div class="field"><label for="amount">Số tiền (VND) *</label><div class="amount-box"><input class="amount" id="amount" name="amount" type="text" inputmode="numeric" pattern="[0-9.,\s]+" maxlength="18" autocomplete="off" required value="{{ row.amount if row else '' }}" placeholder="150000"><span class="unit">đ</span></div><div class="quick" aria-label="Cộng nhanh"><button type="button" data-add="50000">+50k</button><button type="button" data-add="100000">+100k</button><button type="button" data-add="500000">+500k</button><button type="button" data-add="1000000">+1tr</button><span class="amt-fmt" id="amt-fmt" aria-live="polite"></span></div></div>
 <div class="field"><span class="sr" id="cat-label">Danh mục</span><label aria-hidden="true">Danh mục *</label><div class="chips" role="radiogroup" aria-labelledby="cat-label">{% for c in cats %}<label><input type="radio" name="category_id" value="{{ c.id }}" data-kind="{{ c.kind }}" required {{ 'checked' if row and row.category_id==c.id }}><span><i class="dot" style="background:{{ cat_color(c.id) }}"></i>{{ c.name }}</span></label>{% endfor %}</div></div>
@@ -566,7 +609,7 @@ BUDGETS = r"""{% extends base %}{% block body %}
 {% for b in warn %}<li class="al warn"><i class="dot" style="background:{{ cat_color(b.category_id) }}"></i><b>{{ b.name }}</b><span>đã dùng {{ b.pct_i }}%, còn {{ b.remaining|money }}</span></li>{% endfor %}</ul></section>{% endif %}
 {% endif %}
 <div class="budget-layout">
-<section class="panel"><h2 style="margin-bottom:16px">{{ 'Sửa ngân sách' if edit else 'Thiết lập ngân sách' }}</h2><form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<section class="panel"><h2 style="margin-bottom:16px">{{ 'Sửa ngân sách' if edit else 'Thiết lập ngân sách' }}</h2><form method="post" data-save-api="/api/budgets" data-method="POST" data-back="/budgets?month={month}"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
 {% if edit %}<div class="field"><label for="b-month-ro">Tháng</label><input id="b-month-ro" value="{{ month|vmonth }}" disabled><input type="hidden" name="month" value="{{ month }}"></div>
 <div class="field"><label for="b-cat-ro">Danh mục chi</label><input id="b-cat-ro" value="{{ edit.name }}" disabled><input type="hidden" name="category_id" value="{{ edit.category_id }}"></div>
 {% else %}<div class="field"><label for="b-month">Tháng</label><input id="b-month" type="month" name="month" value="{{ month }}" required></div>
@@ -578,7 +621,7 @@ BUDGETS = r"""{% extends base %}{% block body %}
 <div>{% if items %}{% for b in items %}<article class="bcard"><div class="bcard-top"><span class="ico" style="--c:{{ cat_color(b.category_id) }}" aria-hidden="true">{{ b.name|first|upper }}</span><div class="bcard-main"><b>{{ b.name }}</b><span class="muted small num">{{ b.spent|money }} / {{ b.limit|money }}</span></div><span class="bud-pct num {{ b.state }}">{{ b.pct_i }}%</span></div>
 <div class="bar mark80"><div class="fill {{ b.state }}" style="width:{{ b.width }}%"></div></div>
 <div class="bud-foot"><span>{% if b.remaining>=0 %}Còn lại {{ b.remaining|money }}{% else %}Vượt {{ b.over|money }}{% endif %}{% if b.msg %} <span class="msg {{ b.state }}">{{ b.msg }}</span>{% endif %}</span>
-<div class="actions"><a class="btn light sm" href="/budgets?month={{ month }}&edit={{ b.id }}">Sửa</a><form method="post" action="/budgets/{{ b.id }}/delete" onsubmit="return confirm('Xóa ngân sách?')" style="margin:0"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn danger sm">Xóa</button></form></div></div></article>{% endfor %}<div class="legend"><i></i>Vạch đứng là mốc cảnh báo 80%</div>
+<div class="actions"><a class="btn light sm" href="/budgets?month={{ month }}&edit={{ b.id }}">Sửa</a><form method="post" action="/budgets/{{ b.id }}/delete" data-delete-api="/api/budgets/{{ b.id }}" data-confirm="Xóa ngân sách?" style="margin:0"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn danger sm">Xóa</button></form></div></div></article>{% endfor %}<div class="legend"><i></i>Vạch đứng là mốc cảnh báo 80%</div>
 {% else %}<div class="panel empty">Chưa có ngân sách cho tháng này.<br>Chọn danh mục và hạn mức ở khung bên cạnh, hoặc sao chép từ tháng trước.</div>{% endif %}</div></div>{% endblock %}"""
 
 LOGIN = r"""{% extends base %}{% block body %}<div class="auth"><aside class="auth-side"><span class="mark" aria-hidden="true">₫</span><h1>Biết tiền của bạn đi đâu mỗi tháng</h1><ul><li>Ghi khoản thu chi chỉ trong vài chạm</li><li>Đặt ngân sách và nhận cảnh báo từ mức 80%</li><li>Xuất CSV, mở được bằng Excel</li></ul></aside>
@@ -770,10 +813,17 @@ def load_user_and_check_csrf():
             g.user = c.execute("SELECT id,email FROM users WHERE id=?", (user_id,)).fetchone()
         if g.user is None:
             session.pop("uid", None)
-    if request.method == "POST" and app.config.get("CSRF_ENABLED", True):
-        sent = request.form.get("csrf", "").encode()
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and app.config.get("CSRF_ENABLED", True):
+        is_api = request.path.startswith("/api/")
+        if is_api and request.path == "/api/login":
+            return None                                  # chưa có phiên nên chưa có mã CSRF; đăng nhập bắt buộc gửi JSON
+        if is_api and g.user is None:
+            return jsonify({"error": "Bạn cần đăng nhập."}), 401
+        sent = (request.headers.get("X-CSRF-Token", "") if is_api else request.form.get("csrf", "")).encode()
         good = session.get("csrf", "").encode()
         if not sent or not good or not hmac.compare_digest(sent, good):
+            if is_api:
+                return jsonify({"error": "Thiếu hoặc sai mã bảo vệ CSRF. Hãy tải lại trang."}), 403
             return "Phiên làm việc không hợp lệ hoặc đã hết hạn. Hãy quay lại, tải lại trang rồi thử lại.", 400
 
 def uid():
@@ -930,11 +980,10 @@ def dashboard():
     with db() as c:
         balance = c.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE -amount END),0) FROM transactions WHERE user_id=?", (u,)).fetchone()[0]
         p = c.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE 0 END),0) i, COALESCE(SUM(CASE WHEN kind='expense' THEN amount ELSE 0 END),0) e FROM transactions WHERE user_id=? AND substr(tx_date,1,7)=?", (u, prev)).fetchone()
-        chart = chart_data(c, u, month)
     d_income = delta(totals["income"], p["i"], True)
     d_expense = delta(totals["expense"], p["e"], False)
     d_net = delta(totals["income"] - totals["expense"], p["i"] - p["e"], True)
-    return page(DASH, title="Tổng quan", balance=balance, d_income=d_income, d_expense=d_expense, d_net=d_net, chart=chart,month=month,income=totals["income"],expense=totals["expense"],bycat=bycat,maxcat=max([x["total"] for x in bycat],default=1),recent=recent,bitems=bv["items"],b_over=bv["over"],b_warn=bv["warn"],gitems=[v for v in gviews if not v["done"]][:3],gcount=len(gviews),rec_due=sorted((v for v in rviews if v["status"] in ("overdue","today","soon") or (v["status"]=="later" and v["days"]<=14)),key=lambda v:v["days"])[:4],rec_alert=[v for v in rviews if v["status"] in ("overdue","today","soon") and not v["auto"]],rcount=len(rviews),prev_month=shift_month(month,-1),next_month=shift_month(month,1))
+    return page(DASH, title="Tổng quan", balance=balance, d_income=d_income, d_expense=d_expense, d_net=d_net, month=month,income=totals["income"],expense=totals["expense"],bycat=bycat,maxcat=max([x["total"] for x in bycat],default=1),recent=recent,bitems=bv["items"],b_over=bv["over"],b_warn=bv["warn"],gitems=[v for v in gviews if not v["done"]][:3],gcount=len(gviews),rec_due=sorted((v for v in rviews if v["status"] in ("overdue","today","soon") or (v["status"]=="later" and v["days"]<=14)),key=lambda v:v["days"])[:4],rec_alert=[v for v in rviews if v["status"] in ("overdue","today","soon") and not v["auto"]],rcount=len(rviews),prev_month=shift_month(month,-1),next_month=shift_month(month,1))
 
 PER_PAGE = 20
 SORTS = {"date_desc": "t.tx_date DESC,t.id DESC", "date_asc": "t.tx_date ASC,t.id ASC",
@@ -1022,22 +1071,36 @@ def tx_list():
                 chips=chips, presets=presets, export_url=export_url, clear_url=url_for("tx_list"),
                 start=start, end=start + len(rows) - 1 if rows else 0, back=request.full_path.rstrip("?"))
 
+TX_NOTE_MAX = 300
+
+def store_tx(txid, d):
+    """Kiểm tra và lưu một giao dịch. Dùng chung cho form HTML và API JSON.
+    Trả về (id giao dịch, câu cảnh báo ngân sách hoặc None). ValueError: dữ liệu sai; LookupError: không tìm thấy giao dịch để sửa."""
+    kind = d.get("kind", ""); cat = str(d.get("category_id", "")); note = str(d.get("note") or "").strip()
+    amount = parse_amount(str(d.get("amount", "")))
+    tx_date = datetime.strptime(str(d.get("tx_date", "")), "%Y-%m-%d").date().isoformat()   # luôn chuẩn hóa YYYY-MM-DD
+    if kind not in ("income", "expense") or amount <= 0 or amount > MAX_AMOUNT or len(note) > TX_NOTE_MAX: raise ValueError
+    with db() as c:
+        category = c.execute("SELECT * FROM categories WHERE id=?", (cat,)).fetchone()
+        if not category or category["kind"] != kind: raise ValueError
+        if txid:
+            if c.execute("UPDATE transactions SET kind=?,amount=?,tx_date=?,category_id=?,note=? WHERE id=? AND user_id=?", (kind, amount, tx_date, int(cat), note, txid, uid())).rowcount != 1: raise LookupError
+            new_id = txid
+        else:
+            new_id = c.execute("INSERT INTO transactions(kind,amount,tx_date,category_id,note,user_id) VALUES(?,?,?,?,?,?)", (kind, amount, tx_date, int(cat), note, uid())).lastrowid
+        warning = budget_warning(c, uid(), tx_date, int(cat)) if kind == "expense" else None
+    return new_id, warning
+
 def save_tx(txid=None):
-    kind=request.form.get("kind",""); amount=request.form.get("amount",""); tx_date=request.form.get("tx_date",""); cat=request.form.get("category_id",""); note=request.form.get("note","").strip()
     try:
-        amount=parse_amount(amount); datetime.strptime(tx_date,"%Y-%m-%d")
-        if kind not in ("income","expense") or amount<=0 or amount>MAX_AMOUNT: raise ValueError
-        with db() as c:
-            category=c.execute("SELECT * FROM categories WHERE id=?",(cat,)).fetchone()
-            if not category or category["kind"]!=kind: raise ValueError
-            if txid: c.execute("UPDATE transactions SET kind=?,amount=?,tx_date=?,category_id=?,note=? WHERE id=? AND user_id=?",(kind,amount,tx_date,int(cat),note,txid,uid()))
-            else: c.execute("INSERT INTO transactions(kind,amount,tx_date,category_id,note,user_id) VALUES(?,?,?,?,?,?)",(kind,amount,tx_date,int(cat),note,uid()))
-            warning=budget_warning(c,uid(),tx_date,int(cat)) if kind=="expense" else None
-        flash("Đã lưu giao dịch.","success")
-        if warning: flash(warning,"warn")
-        return redirect(safe_next(request.args.get("next"), url_for("tx_list")))
-    except (ValueError,TypeError,OverflowError):
-        flash("Dữ liệu không hợp lệ. Kiểm tra số tiền, ngày và danh mục.","error"); return None
+        _, warning = store_tx(txid, request.form)
+    except LookupError:
+        flash("Không tìm thấy giao dịch.", "error"); return redirect(url_for("tx_list"))
+    except (ValueError, TypeError, OverflowError):
+        flash("Dữ liệu không hợp lệ. Kiểm tra số tiền, ngày và danh mục.", "error"); return None
+    flash("Đã lưu giao dịch.", "success")
+    if warning: flash(warning, "warn")
+    return redirect(safe_next(request.args.get("next"), url_for("tx_list")))
 
 @app.route("/transactions/new",methods=["GET","POST"])
 @login_required
@@ -1064,6 +1127,15 @@ def tx_delete(txid):
     with db() as c: c.execute("DELETE FROM transactions WHERE id=? AND user_id=?",(txid,uid()))
     flash("Đã xóa giao dịch.","success"); return redirect(safe_next(request.form.get("next"), url_for("tx_list")))
 
+def store_budget(month, cat, amount_raw):
+    """Thêm hoặc cập nhật hạn mức ngân sách của một danh mục chi trong tháng. Dùng chung cho form HTML và API JSON."""
+    amount = parse_amount(str(amount_raw))
+    with db() as c:
+        category = c.execute("SELECT * FROM categories WHERE id=? AND kind='expense'", (str(cat),)).fetchone()
+        if not category or amount <= 0 or amount > MAX_AMOUNT: raise ValueError
+        c.execute("INSERT INTO budgets(month,category_id,limit_amount,user_id) VALUES(?,?,?,?) ON CONFLICT(user_id,month,category_id) DO UPDATE SET limit_amount=excluded.limit_amount", (month, int(cat), amount, uid()))
+        return c.execute("SELECT id FROM budgets WHERE user_id=? AND month=? AND category_id=?", (uid(), month, int(cat))).fetchone()["id"]
+
 @app.route("/budgets",methods=["GET","POST"])
 @login_required
 def budget_page():
@@ -1075,13 +1147,9 @@ def budget_page():
             edit=c.execute("SELECT b.*,ca.name FROM budgets b JOIN categories ca ON ca.id=b.category_id WHERE b.id=? AND b.user_id=?",(int(edit_id),uid())).fetchone()
         if edit: month=edit["month"]
     if request.method=="POST":
-        cat=request.form.get("category_id",""); amount=request.form.get("limit_amount",""); month=month_arg(request.form.get("month",month))
+        month=month_arg(request.form.get("month",month))
         try:
-            amount=parse_amount(amount)
-            with db() as c:
-                category=c.execute("SELECT * FROM categories WHERE id=? AND kind='expense'",(cat,)).fetchone()
-                if not category or amount<=0 or amount>MAX_AMOUNT: raise ValueError
-                c.execute("INSERT INTO budgets(month,category_id,limit_amount,user_id) VALUES(?,?,?,?) ON CONFLICT(user_id,month,category_id) DO UPDATE SET limit_amount=excluded.limit_amount",(month,int(cat),amount,uid()))
+            store_budget(month, request.form.get("category_id",""), request.form.get("limit_amount",""))
             flash("Đã lưu ngân sách.","success"); return redirect(url_for("budget_page",month=month))
         except (ValueError,TypeError,OverflowError): flash("Chọn danh mục và nhập hạn mức lớn hơn 0.","error")
     with db() as c:
@@ -1493,6 +1561,233 @@ def goal_deposit_delete(gid, did):
         else:
             c.execute("DELETE FROM goal_deposits WHERE id=?", (did,)); flash("Đã xóa khoản này.", "success")
     return redirect(url_for("goal_detail", gid=gid) if g else url_for("goals_page"))
+
+# ---------------------------------------------------------------- API JSON (giao diện gọi bằng fetch, bên ngoài gọi bằng HTTP)
+class ApiError(Exception):
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.message, self.status = message, status
+
+@app.errorhandler(ApiError)
+def handle_api_error(e):
+    return jsonify({"error": e.message}), e.status
+
+def _json_error(e, message):
+    return (jsonify({"error": message}), e.code) if request.path.startswith("/api/") else e
+
+@app.errorhandler(404)
+def handle_404(e): return _json_error(e, "Không tìm thấy đường dẫn API.")
+
+@app.errorhandler(405)
+def handle_405(e): return _json_error(e, "Phương thức không được hỗ trợ.")
+
+@app.errorhandler(413)
+def handle_413(e): return _json_error(e, "Dữ liệu gửi lên quá lớn.")
+
+@app.after_request
+def common_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    if request.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+def api_login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if g.user is None:
+            raise ApiError("Bạn cần đăng nhập.", 401)
+        return f(*args, **kwargs)
+    return wrapper
+
+def api_body():
+    d = request.get_json(silent=True)
+    if not isinstance(d, dict):
+        raise ApiError("Dữ liệu gửi lên phải là JSON.", 400)
+    return d
+
+def api_flash(message, kind="success"):
+    """Chỉ đặt thông báo (flash) khi giao diện yêu cầu bằng header X-Flash, để thông báo hiện ở trang kế tiếp. Máy khách khác không bị phình cookie."""
+    if request.headers.get("X-Flash") == "1":
+        flash(message, kind)
+
+def api_month():
+    m = request.args.get("month") or date.today().strftime("%Y-%m")
+    try:
+        return datetime.strptime(m, "%Y-%m").strftime("%Y-%m")
+    except ValueError:
+        raise ApiError("Tháng không hợp lệ (định dạng YYYY-MM).")
+
+def tx_json(r):
+    return {"id": r["id"], "kind": r["kind"], "amount": r["amount"], "tx_date": r["tx_date"],
+            "category_id": r["category_id"], "category": r["category"], "note": r["note"] or ""}
+
+def get_tx(c, tid):
+    r = c.execute("SELECT t.*,ca.name category " + TX_FROM + " WHERE t.id=? AND t.user_id=?", (tid, uid())).fetchone()
+    return tx_json(r) if r else None
+
+@app.post("/api/login")
+def api_do_login():
+    d = api_body()
+    email, password = str(d.get("email", "")).strip().lower(), str(d.get("password", ""))
+    key = (request.remote_addr, email)
+    if is_locked(key):
+        raise ApiError("Đăng nhập sai quá nhiều lần. Hãy thử lại sau vài phút.", 429)
+    with db() as c:
+        user = c.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+    ok = check_password_hash(user["password_hash"] if user else DUMMY_HASH, password)
+    if not (user and ok):
+        record_fail(key)
+        raise ApiError("Email hoặc mật khẩu không đúng.", 401)
+    LOGIN_FAILS.pop(key, None)
+    start_session(user["id"])
+    return jsonify({"user": {"id": user["id"], "email": user["email"]}, "csrf": session["csrf"]})
+
+@app.post("/api/logout")
+@api_login_required
+def api_do_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+@app.get("/api/me")
+@api_login_required
+def api_me():
+    return jsonify({"user": {"id": g.user["id"], "email": g.user["email"]}, "csrf": csrf_token()})
+
+@app.get("/api/categories")
+@api_login_required
+def api_categories():
+    return jsonify([dict(r) for r in categories()])
+
+@app.get("/api/transactions")
+@api_login_required
+def api_tx_list():
+    f = parse_filters(request.args)
+    where, params = filter_sql(f, uid())
+    try:
+        page_no = max(1, int(request.args.get("page", "1")))
+        per = min(100, max(1, int(request.args.get("per_page", PER_PAGE))))
+    except ValueError:
+        raise ApiError("page và per_page phải là số nguyên.")
+    with db() as c:
+        agg = c.execute(f"SELECT COUNT(*) n, COALESCE(SUM(CASE WHEN t.kind='income' THEN t.amount END),0) i, COALESCE(SUM(CASE WHEN t.kind='expense' THEN t.amount END),0) e {TX_FROM} WHERE {where}", params).fetchone()
+        pages = max(1, -(-agg["n"] // per)); page_no = min(page_no, pages)
+        rows = c.execute(f"SELECT t.*,ca.name category {TX_FROM} WHERE {where} ORDER BY {SORTS[f['sort']]} LIMIT ? OFFSET ?", params + [per, (page_no - 1) * per]).fetchall()
+    return jsonify({"items": [tx_json(r) for r in rows], "total": agg["n"], "page": page_no, "pages": pages, "per_page": per,
+                    "total_income": agg["i"], "total_expense": agg["e"], "filters": f})
+
+@app.post("/api/transactions")
+@api_login_required
+def api_tx_create():
+    d = api_body()
+    try:
+        tid, warning = store_tx(None, d)
+    except (ValueError, TypeError, OverflowError):
+        raise ApiError("Dữ liệu không hợp lệ. Kiểm tra số tiền, ngày và danh mục.")
+    api_flash("Đã lưu giao dịch.")
+    if warning: api_flash(warning, "warn")
+    with db() as c:
+        tx = get_tx(c, tid)
+    return jsonify({"transaction": tx, "warning": warning}), 201
+
+@app.get("/api/transactions/<int:tid>")
+@api_login_required
+def api_tx_get(tid):
+    with db() as c:
+        tx = get_tx(c, tid)
+    if not tx: raise ApiError("Không tìm thấy giao dịch.", 404)
+    return jsonify(tx)
+
+@app.put("/api/transactions/<int:tid>")
+@api_login_required
+def api_tx_update(tid):
+    d = api_body()
+    try:
+        _, warning = store_tx(tid, d)
+    except LookupError:
+        raise ApiError("Không tìm thấy giao dịch.", 404)
+    except (ValueError, TypeError, OverflowError):
+        raise ApiError("Dữ liệu không hợp lệ. Kiểm tra số tiền, ngày và danh mục.")
+    api_flash("Đã lưu giao dịch.")
+    if warning: api_flash(warning, "warn")
+    with db() as c:
+        tx = get_tx(c, tid)
+    return jsonify({"transaction": tx, "warning": warning})
+
+@app.delete("/api/transactions/<int:tid>")
+@api_login_required
+def api_tx_delete(tid):
+    with db() as c:
+        n = c.execute("DELETE FROM transactions WHERE id=? AND user_id=?", (tid, uid())).rowcount
+    if n != 1: raise ApiError("Không tìm thấy giao dịch.", 404)
+    api_flash("Đã xóa giao dịch.")
+    return jsonify({"ok": True})
+
+def budget_json(i):
+    """Dạng JSON của một ngân sách: tên trường theo đúng schema.sql (category_id, limit_amount...)."""
+    return {"id": i["id"], "category_id": i["category_id"], "name": i["name"], "limit_amount": i["limit"], "spent": i["spent"],
+            "remaining": i["remaining"], "over_amount": i["over"], "percent": round(i["pct"], 1), "state": i["state"], "message": i["msg"]}
+
+def budget_total_json(t):
+    return {"limit_amount": t["limit"], "spent": t["spent"], "remaining": t["remaining"], "percent": t["pct_i"], "state": t["state"]}
+
+BUDGET_ROWS_SQL = """SELECT b.*,ca.name,COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.user_id=b.user_id AND t.category_id=b.category_id AND t.kind='expense' AND substr(t.tx_date,1,7)=b.month),0) spent FROM budgets b JOIN categories ca ON ca.id=b.category_id WHERE b.user_id=? AND b.month=? ORDER BY ca.name"""
+
+@app.get("/api/budgets")
+@api_login_required
+def api_budgets():
+    month = api_month()
+    with db() as c:
+        bv = budget_view(c.execute(BUDGET_ROWS_SQL, (uid(), month)).fetchall())
+    return jsonify({"month": month, "items": [budget_json(i) for i in bv["items"]], "total": budget_total_json(bv["total"])})
+
+@app.post("/api/budgets")
+@api_login_required
+def api_budget_save():
+    d = api_body()
+    try:
+        month = datetime.strptime(str(d.get("month", "")), "%Y-%m").strftime("%Y-%m")
+        bid = store_budget(month, d.get("category_id", ""), d.get("limit_amount", ""))
+    except (ValueError, TypeError, OverflowError):
+        raise ApiError("Chọn tháng, danh mục chi và nhập hạn mức lớn hơn 0.")
+    api_flash("Đã lưu ngân sách.")
+    with db() as c:
+        item = next((budget_json(i) for i in budget_view(c.execute(BUDGET_ROWS_SQL, (uid(), month)).fetchall())["items"] if i["id"] == bid), None)
+    return jsonify({"budget": item}), 201
+
+@app.delete("/api/budgets/<int:bid>")
+@api_login_required
+def api_budget_delete(bid):
+    with db() as c:
+        n = c.execute("DELETE FROM budgets WHERE id=? AND user_id=?", (bid, uid())).rowcount
+    if n != 1: raise ApiError("Không tìm thấy ngân sách.", 404)
+    api_flash("Đã xóa ngân sách.")
+    return jsonify({"ok": True})
+
+@app.get("/api/summary")
+@api_login_required
+def api_summary():
+    """Tổng quan một tháng: số dư, tổng thu, tổng chi, so sánh tháng trước, chi theo danh mục, tình trạng ngân sách."""
+    month, u = api_month(), uid()
+    with db() as c:
+        sums = "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE 0 END),0) i, COALESCE(SUM(CASE WHEN kind='expense' THEN amount ELSE 0 END),0) e FROM transactions WHERE user_id=? AND substr(tx_date,1,7)=?"
+        cur, prev = c.execute(sums, (u, month)).fetchone(), c.execute(sums, (u, shift_month(month, -1))).fetchone()
+        balance = c.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE -amount END),0) FROM transactions WHERE user_id=?", (u,)).fetchone()[0]
+        bycat = c.execute("SELECT ca.id,ca.name,SUM(t.amount) total FROM transactions t JOIN categories ca ON ca.id=t.category_id WHERE t.user_id=? AND t.kind='expense' AND substr(t.tx_date,1,7)=? GROUP BY ca.id ORDER BY total DESC", (u, month)).fetchall()
+        bv = budget_view(c.execute(BUDGET_ROWS_SQL, (u, month)).fetchall())
+    income, expense = cur["i"], cur["e"]
+    return jsonify({"month": month, "balance": balance, "income": income, "expense": expense, "net": income - expense,
+                    "previous": {"income": prev["i"], "expense": prev["e"]},
+                    "comparison": {"income": delta(income, prev["i"], True), "expense": delta(expense, prev["e"], False),
+                                   "net": delta(income - expense, prev["i"] - prev["e"], True)},
+                    "categories": [{"category_id": r["id"], "name": r["name"], "total": r["total"], "share": round(r["total"] / expense * 100, 1)} for r in bycat],
+                    "budget": {"total": budget_total_json(bv["total"]), "over": [i["name"] for i in bv["over"]], "warn": [i["name"] for i in bv["warn"]]}})
+
+@app.get("/api/chart")
+@api_login_required
+def api_chart():
+    month = api_month()
+    with db() as c:
+        return jsonify(chart_data(c, uid(), month))
 
 def csv_safe(v):
     """Ô bắt đầu bằng = + - @ có thể bị Excel hiểu là công thức; thêm dấu nháy để luôn là văn bản."""
