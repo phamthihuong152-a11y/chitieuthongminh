@@ -56,7 +56,7 @@ Dữ liệu cũ được giữ nguyên. **Tài khoản đầu tiên đăng ký s
 ```bat
 python test_app.py
 ```
-Bộ test gồm 17 nhóm: danh mục, CRUD, dashboard, ngân sách, CSV, lưu bền vững, bắt buộc đăng nhập, đăng ký/đăng nhập, cách ly dữ liệu giữa người dùng, CSRF, nâng cấp từ DB cũ, số dư/so sánh kỳ trước/biểu đồ, tìm kiếm/lọc/sắp xếp/phân trang giao dịch, ngân sách và cảnh báo, mục tiêu tiết kiệm, giao dịch định kỳ, lưu trữ phía máy chủ và schema.sql. Test dùng file DB riêng và không ảnh hưởng dữ liệu thật.
+Bộ test gồm 19 nhóm: danh mục, CRUD, dashboard, ngân sách, CSV, lưu bền vững, bắt buộc đăng nhập, đăng ký/đăng nhập, cách ly dữ liệu giữa người dùng, CSRF, nâng cấp từ DB cũ, số dư/so sánh kỳ trước/biểu đồ, tìm kiếm/lọc/sắp xếp/phân trang giao dịch, ngân sách và cảnh báo, mục tiêu tiết kiệm, giao dịch định kỳ, lưu trữ phía máy chủ và schema.sql, API JSON (đăng nhập, CSRF, giao dịch, ngân sách, tổng quan, biểu đồ), tên trường khớp schema. Test dùng file DB riêng và không ảnh hưởng dữ liệu thật.
 
 ## Bảo mật
 - Mọi truy vấn dữ liệu đều lọc theo `user_id`; người dùng không xem hoặc sửa được dữ liệu của người khác.
@@ -65,10 +65,44 @@ Bộ test gồm 17 nhóm: danh mục, CRUD, dashboard, ngân sách, CSV, lưu b�
 - Chưa có chức năng quên mật khẩu hoặc xác thực email. Nếu mở rộng cho nhiều người dùng, nên bổ sung.
 - Sao lưu: dừng app rồi sao chép file `chi_tieu.db` (hoặc thư mục `/data` trong Docker).
 
-## Lưu trữ dữ liệu
-- Toàn bộ dữ liệu nằm trong **cơ sở dữ liệu SQLite phía máy chủ** (`chi_tieu.db`, hoặc đường dẫn trong biến `DB_PATH`). Trình duyệt không lưu dữ liệu nào (không dùng `localStorage`) và mọi thao tác đều đi qua các route của Flask.
-- Cấu trúc bảng nằm trong `schema.sql` và là **nguồn duy nhất**: `app.py` đọc và chạy file này mỗi lần khởi động (`init_db`). Muốn thêm bảng hoặc cột thì sửa `schema.sql`. Mọi câu lệnh dùng `IF NOT EXISTS` nên chạy lại không làm mất dữ liệu. File `schema.sql` phải nằm cạnh `app.py` (Dockerfile đã copy cả hai).
-- Tên cột thống nhất dạng `snake_case` (`category_id`, `limit_amount`, `created_at`...), ngày lưu chuỗi ISO `YYYY-MM-DD`, số tiền là số nguyên VND.
+## Kiến trúc và lưu trữ dữ liệu
+
+```
+Trình duyệt  --fetch /api/...-->  Flask (app.py)  -->  SQLite (chi_tieu.db)
+   (HTML + JavaScript)             API JSON             cấu trúc bảng: schema.sql
+```
+
+- Toàn bộ dữ liệu nằm trong **cơ sở dữ liệu SQLite phía máy chủ** (`chi_tieu.db`, hoặc đường dẫn trong biến `DB_PATH`). Trình duyệt **không lưu dữ liệu nào** (không dùng `localStorage`).
+- Giao diện **gọi API của máy chủ bằng `fetch`**: biểu đồ Dashboard (`GET /api/chart`), thêm và sửa giao dịch (`POST`, `PUT /api/transactions`), xóa giao dịch (`DELETE /api/transactions/<id>`), lưu và xóa ngân sách (`POST /api/budgets`, `DELETE /api/budgets/<id>`). Các trang còn lại được máy chủ dựng sẵn và vẫn dùng được khi tắt JavaScript.
+- Cấu trúc bảng nằm trong `schema.sql` và là **nguồn duy nhất**: `app.py` đọc và chạy file này mỗi lần khởi động (`init_db`). Muốn thêm bảng hoặc cột thì sửa `schema.sql`. Mọi câu lệnh dùng `IF NOT EXISTS` nên chạy lại không làm mất dữ liệu. File `schema.sql` phải nằm cạnh `app.py` (Dockerfile đã copy cả hai); nếu thiếu, ứng dụng dùng bản sao dự phòng nhúng trong `app.py` và ghi cảnh báo ra log.
+- Tên trường thống nhất `snake_case` ở cả cơ sở dữ liệu lẫn JSON của API (`category_id`, `limit_amount`, `tx_date`, `created_at`...). Ngày lưu chuỗi ISO `YYYY-MM-DD`, số tiền là số nguyên VND.
+
+## API REST
+
+Mọi API trả JSON (lỗi có dạng `{"error": "..."}` kèm mã HTTP 400, 401, 403, 404, 405, 413, 429). Cần đăng nhập (cookie phiên). Các thao tác thay đổi dữ liệu cần header `X-CSRF-Token` (mã nhận được khi đăng nhập hoặc từ `GET /api/me`). Mọi dữ liệu chỉ thuộc về người đang đăng nhập.
+
+| Phương thức và đường dẫn | Mô tả |
+|---|---|
+| `POST /api/login` | Đăng nhập: `{"email", "password"}`, trả `user` và `csrf` (không cần mã CSRF, bắt buộc gửi JSON) |
+| `POST /api/logout`, `GET /api/me` | Đăng xuất; thông tin phiên và mã CSRF |
+| `GET /api/categories` | Danh sách danh mục thu và chi |
+| `GET /api/transactions` | Danh sách giao dịch. Tham số: `date_from`, `date_to`, `kind`, `category_id`, `q`, `sort`, `page`, `per_page` (tối đa 100). Trả `items`, `total`, `pages`, `total_income`, `total_expense` |
+| `POST /api/transactions` | Thêm giao dịch: `kind`, `amount`, `tx_date`, `category_id`, `note`. Trả giao dịch và `warning` nếu danh mục đã dùng từ 80% ngân sách |
+| `GET`, `PUT`, `DELETE /api/transactions/<id>` | Xem, sửa, xóa một giao dịch |
+| `GET /api/budgets?month=YYYY-MM` | Ngân sách của tháng: hạn mức (`limit_amount`), đã chi, còn lại, phần trăm, trạng thái |
+| `POST /api/budgets` | Thêm hoặc cập nhật ngân sách: `month`, `category_id`, `limit_amount` |
+| `DELETE /api/budgets/<id>` | Xóa ngân sách |
+| `GET /api/summary?month=YYYY-MM` | Số dư, tổng thu, tổng chi, so sánh tháng trước, chi theo danh mục, tình trạng ngân sách |
+| `GET /api/chart?month=YYYY-MM` | Dữ liệu biểu đồ thu chi theo ngày, tháng, năm |
+
+Ví dụ:
+
+```bash
+curl -c cj -X POST localhost:5000/api/login -H "Content-Type: application/json" -d '{"email":"a@example.com","password":"matkhau-cua-ban"}'
+curl -b cj localhost:5000/api/transactions?per_page=5
+curl -b cj -X POST localhost:5000/api/transactions -H "Content-Type: application/json" -H "X-CSRF-Token: <csrf>" \
+     -d '{"kind":"expense","amount":"150000","tx_date":"2026-10-20","category_id":4,"note":"Ăn trưa"}'
+```
 
 ## Nâng cấp cơ sở dữ liệu
 Các tính năng mới chỉ **thêm bảng** (`goals`, `goal_deposits`, `recurring`) bằng `CREATE TABLE IF NOT EXISTS` khi ứng dụng khởi động. Dữ liệu và tài khoản hiện có không bị thay đổi hay xóa. Nên sao lưu file `chi_tieu.db` trước mỗi lần cập nhật.
