@@ -24,6 +24,15 @@ sys.path.insert(0, str(BASE_DIR))
 
 import app
 
+
+def sql_count(table, where="1=1"):
+    import sqlite3 as _sq
+    c = _sq.connect(app.DB)
+    try:
+        return c.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}").fetchone()[0]
+    finally:
+        c.close()
+
 TEST_DB = BASE_DIR / "test_chi_tieu.db"
 EMAIL_A, PASS_A = "a@example.com", "matkhau-A-12345"
 EMAIL_B, PASS_B = "b@example.com", "matkhau-B-67890"
@@ -442,8 +451,7 @@ class TestChiTieuThongMinh(unittest.TestCase):
 
         def chart_of(client, month):
             html = client.get(f"/?month={month}").get_data(as_text=True)
-            m = re.search(r'<script type="application/json" id="chart-data">(.*?)</script>', html, re.S)
-            return html, json.loads(m.group(1))
+            return html, client.get(f"/api/chart?month={month}").get_json()   # biểu đồ do giao diện lấy qua fetch /api/chart
 
         html, data = chart_of(self.client, "2026-10")
         # Số dư hiện tại tính trên mọi tháng: (15.000.000 + 4.321.000) - 9.500.000
@@ -1047,10 +1055,224 @@ class TestChiTieuThongMinh(unittest.TestCase):
             res = self.client.get(path)
             self.assertEqual(res.status_code, 200, path)
             html = res.get_data(as_text=True)
-            for banned in ("localStorage", "sessionStorage", "indexedDB", "fetch(", "XMLHttpRequest"):
+            for banned in ("localStorage", "sessionStorage", "indexedDB", "cttm_", "categoryId", "createdAt"):
                 self.assertNotIn(banned, html, f"{banned} xuất hiện ở {path}")
+        # 8. Ngược lại, giao diện PHẢI gọi API của máy chủ bằng fetch (không chỉ gửi form)
+        dash = self.client.get("/").get_data(as_text=True)
+        self.assertIn("fetch(", dash)
+        self.assertIn("/api/chart?month=", dash)
+        self.assertIn("data-save-api", self.client.get("/transactions/new").get_data(as_text=True))
+        self.assertIn("data-delete-api", self.client.get("/transactions").get_data(as_text=True))
+        self.assertIn("data-save-api", self.client.get("/budgets").get_data(as_text=True))
         with app.db() as c:
             self.assertGreater(c.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 0)
+
+    def test_18_json_api(self):
+        """18. API JSON: đăng nhập, giao dịch, ngân sách, tổng quan, biểu đồ, CSRF, thông báo"""
+        anon = app.app.test_client()
+        protected = [("get", "/api/me"), ("get", "/api/categories"), ("get", "/api/transactions"), ("post", "/api/transactions"),
+                     ("get", "/api/transactions/1"), ("put", "/api/transactions/1"), ("delete", "/api/transactions/1"),
+                     ("get", "/api/budgets"), ("post", "/api/budgets"), ("delete", "/api/budgets/1"),
+                     ("get", "/api/summary"), ("get", "/api/chart"), ("post", "/api/logout")]
+        for method, path in protected:
+            r = getattr(anon, method)(path, **({"json": {}} if method in ("post", "put") else {}))
+            self.assertEqual(r.status_code, 401, (method, path))
+            self.assertIn("error", r.get_json())
+        register(app.app.test_client(), "api@example.com", "matkhau-api-123")
+        register(app.app.test_client(), "api-other@example.com", "matkhau-api-456")
+
+        # --- đăng nhập bằng JSON ---
+        api = app.app.test_client()
+        self.assertEqual(api.post("/api/login", json={"email": "api@example.com", "password": "sai"}).status_code, 401)
+        self.assertEqual(api.post("/api/login", data="khong phai json").status_code, 400)
+        r = api.post("/api/login", json={"email": "API@example.com", "password": "matkhau-api-123"})
+        self.assertEqual(r.status_code, 200)
+        me = r.get_json()
+        self.assertEqual(me["user"]["email"], "api@example.com")
+        self.assertNotIn("scrypt", r.get_data(as_text=True))
+        self.assertEqual(api.get("/api/me").get_json()["csrf"], me["csrf"])
+        self.assertEqual(re.search(r'name="csrf-token" content="([0-9a-f]+)"', api.get("/").get_data(as_text=True)).group(1), me["csrf"])
+        r = api.get("/api/categories")
+        self.assertTrue(r.headers["Content-Type"].startswith("application/json"))
+        self.assertEqual(r.headers["Cache-Control"], "no-store")
+        cats = {c["name"]: c["id"] for c in r.get_json()}
+        self.assertEqual(len(cats), 10 if "Chi phí khác" not in cats else 11)
+
+        def post_tx(**over):
+            data = {"kind": "expense", "amount": "1.500.000", "tx_date": "2029-03-10", "category_id": cats["Ăn uống"], "note": "API thử"}
+            data.update(over)
+            return api.post("/api/transactions", json=data)
+
+        # --- thêm giao dịch: kiểm tra dữ liệu ---
+        for bad in ({"amount": "0"}, {"amount": "abc"}, {"amount": "99999999999999999999"}, {"kind": "khac"}, {"tx_date": "khong-phai-ngay"},
+                    {"tx_date": "2029-02-31"}, {"category_id": cats["Lương"]}, {"category_id": 999999}, {"note": "n" * 301}, {"kind": None}):
+            r = post_tx(**bad)
+            self.assertEqual(r.status_code, 400, bad)
+            self.assertIn("error", r.get_json())
+        self.assertEqual(api.post("/api/transactions", data="x").status_code, 400)
+        r = post_tx(tx_date="2029-3-5")                                   # ngày được chuẩn hóa YYYY-MM-DD
+        self.assertEqual(r.status_code, 201)
+        tx = r.get_json()["transaction"]
+        self.assertEqual((tx["tx_date"], tx["amount"], tx["category"], tx["note"]), ("2029-03-05", 1500000, "Ăn uống", "API thử"))
+        with app.db() as c:
+            row = c.execute("SELECT * FROM transactions WHERE id=?", (tx["id"],)).fetchone()
+        self.assertEqual((row["tx_date"], row["amount"]), ("2029-03-05", 1500000))                   # đã ghi vào SQLite
+        self.assertEqual(api.delete(f"/api/transactions/{tx['id']}").status_code, 200)
+
+        # --- dữ liệu mẫu cho danh sách, lọc, phân trang ---
+        for i in range(1, 26):
+            self.assertEqual(post_tx(amount=i * 1000, tx_date=f"2029-03-{(i % 28) + 1:02d}", note=f"API {i:02d}",
+                                     category_id=cats["Ăn uống"] if i % 2 else cats["Đi lại"]).status_code, 201)
+        self.assertEqual(post_tx(kind="income", amount=5000000, tx_date="2029-03-01", note="API Lương", category_id=cats["Lương"]).status_code, 201)
+
+        lst = api.get("/api/transactions?per_page=10").get_json()
+        self.assertEqual((len(lst["items"]), lst["total"], lst["pages"], lst["page"], lst["per_page"]), (10, 26, 3, 1, 10))
+        self.assertEqual((lst["total_income"], lst["total_expense"]), (5000000, 325000))
+        self.assertEqual(len(api.get("/api/transactions?per_page=10&page=3").get_json()["items"]), 6)
+        self.assertEqual(api.get("/api/transactions?per_page=500").get_json()["per_page"], 100)
+        self.assertEqual(api.get("/api/transactions?page=abc").status_code, 400)
+        self.assertEqual(api.get("/api/transactions?kind=income").get_json()["total"], 1)
+        self.assertEqual(api.get(f"/api/transactions?category_id={cats['Đi lại']}").get_json()["total"], 12)
+        self.assertEqual(api.get("/api/transactions?q=api+07").get_json()["total"], 1)              # không phân biệt hoa thường
+        self.assertEqual(api.get("/api/transactions?date_from=2029-03-01&date_to=2029-03-01").get_json()["total"], 1)
+        self.assertEqual(api.get("/api/transactions?sort=amount_desc").get_json()["items"][0]["amount"], 5000000)
+        first = lst["items"][0]
+        self.assertEqual(set(first), {"id", "kind", "amount", "tx_date", "category_id", "category", "note"})
+
+        # --- tổng quan và biểu đồ ---
+        sm = api.get("/api/summary?month=2029-03").get_json()
+        self.assertEqual((sm["income"], sm["expense"], sm["net"], sm["balance"]), (5000000, 325000, 4675000, 4675000))
+        self.assertEqual(sm["comparison"]["income"]["text"], "Chưa có số liệu tháng trước")
+        self.assertEqual(sm["categories"][0]["name"], "Ăn uống")
+        self.assertEqual(sm["categories"][0]["total"], 169000)
+        self.assertEqual(round(sum(c["share"] for c in sm["categories"])), 100)
+        self.assertEqual(api.get("/api/summary?month=2029-13").status_code, 400)
+        ch = api.get("/api/chart?month=2029-03").get_json()
+        self.assertEqual(len(ch["day"]["labels"]), 31)
+        self.assertEqual(ch["day"]["income"][0], 5000000)
+        self.assertEqual(sum(ch["day"]["expense"]), 325000)
+        self.assertEqual(ch["month"]["income"][2], 5000000)
+        self.assertIn("2029", ch["year"]["labels"])
+        self.assertEqual(api.get("/api/chart?month=khong-hop-le").status_code, 400)
+
+        # --- ngân sách ---
+        def post_budget(**over):
+            data = {"month": "2029-03", "category_id": cats["Ăn uống"], "limit_amount": "100.000"}
+            data.update(over)
+            return api.post("/api/budgets", json=data)
+        for bad in ({"month": "2029-13"}, {"month": ""}, {"category_id": cats["Lương"]}, {"category_id": 999999}, {"limit_amount": "0"}, {"limit_amount": "abc"}):
+            self.assertEqual(post_budget(**bad).status_code, 400, bad)
+        b = post_budget()
+        self.assertEqual(b.status_code, 201)
+        item = b.get_json()["budget"]
+        self.assertEqual((item["limit_amount"], item["spent"], item["state"], round(item["percent"])), (100000, 169000, "over", 169))
+        self.assertEqual(set(item), {"id", "category_id", "name", "limit_amount", "spent", "remaining", "over_amount", "percent", "state", "message"})
+        again = post_budget(limit_amount="200000").get_json()["budget"]                              # lưu lại cùng danh mục và tháng: cập nhật hạn mức
+        self.assertEqual((again["id"], again["limit_amount"], again["state"]), (item["id"], 200000, "warn"))
+        bl = api.get("/api/budgets?month=2029-03").get_json()
+        self.assertEqual((len(bl["items"]), bl["total"]["limit_amount"], bl["total"]["spent"]), (1, 200000, 169000))
+        self.assertEqual(sql_count("budgets", "month='2029-03' AND category_id=%d" % cats["Ăn uống"]), 1)
+        self.assertEqual(api.get("/api/summary?month=2029-03").get_json()["budget"]["warn"], ["Ăn uống"])
+        self.assertEqual(api.get("/api/budgets?month=sai").status_code, 400)
+
+        # --- sửa, xem, xóa giao dịch ---
+        tid = api.get("/api/transactions?q=api+07").get_json()["items"][0]["id"]
+        self.assertEqual(api.get(f"/api/transactions/{tid}").get_json()["note"], "API 07")
+        r = api.put(f"/api/transactions/{tid}", json={"kind": "expense", "amount": "9000", "tx_date": "2029-03-12", "category_id": cats["Đi lại"], "note": "API 07 đã sửa"})
+        self.assertEqual(r.status_code, 200)
+        got = api.get(f"/api/transactions/{tid}").get_json()
+        self.assertEqual((got["amount"], got["category"], got["note"], got["tx_date"]), (9000, "Đi lại", "API 07 đã sửa", "2029-03-12"))
+        self.assertEqual(api.put(f"/api/transactions/{tid}", json={"kind": "income", "amount": "9000", "tx_date": "2029-03-12", "category_id": cats["Đi lại"]}).status_code, 400)
+        self.assertEqual(api.get(f"/api/transactions/{tid}").get_json()["kind"], "expense")           # sửa sai không làm đổi dữ liệu
+        self.assertEqual(api.get("/api/transactions/999999").status_code, 404)
+        self.assertEqual(api.put("/api/transactions/999999", json={"kind": "expense", "amount": "1", "tx_date": "2029-03-01", "category_id": cats["Đi lại"]}).status_code, 404)
+
+        # --- người dùng khác không thấy, không sửa, không xóa được ---
+        other = app.app.test_client()
+        other.post("/api/login", json={"email": "api-other@example.com", "password": "matkhau-api-456"})
+        self.assertEqual(other.get("/api/transactions").get_json()["total"], 0)
+        self.assertEqual(other.get("/api/summary?month=2029-03").get_json()["balance"], 0)
+        self.assertEqual(other.get("/api/budgets?month=2029-03").get_json()["items"], [])
+        self.assertEqual(other.get(f"/api/transactions/{tid}").status_code, 404)
+        self.assertEqual(other.put(f"/api/transactions/{tid}", json={"kind": "expense", "amount": "1", "tx_date": "2029-03-01", "category_id": cats["Đi lại"]}).status_code, 404)
+        self.assertEqual(other.delete(f"/api/transactions/{tid}").status_code, 404)
+        self.assertEqual(other.delete(f"/api/budgets/{item['id']}").status_code, 404)
+        self.assertEqual(sql_count("transactions", "id=%d" % tid), 1)
+
+        # --- xóa ---
+        n0 = api.get("/api/transactions").get_json()["total"]
+        self.assertEqual(api.delete(f"/api/transactions/{tid}").status_code, 200)
+        self.assertEqual(api.get("/api/transactions").get_json()["total"], n0 - 1)
+        self.assertEqual(api.delete(f"/api/transactions/{tid}").status_code, 404)
+        self.assertEqual(api.delete(f"/api/budgets/{item['id']}").status_code, 200)
+        self.assertEqual(api.delete(f"/api/budgets/{item['id']}").status_code, 404)
+
+        # --- đường dẫn lạ, phương thức sai: lỗi dạng JSON ---
+        r = api.get("/api/khong-co")
+        self.assertEqual(r.status_code, 404)
+        self.assertIn("error", r.get_json())
+        self.assertEqual(api.patch("/api/transactions").status_code, 405)
+        self.assertIn("error", api.patch("/api/transactions").get_json())
+
+        # --- thông báo (flash): chỉ đặt khi giao diện gửi X-Flash ---
+        flash_client, quiet = app.app.test_client(), app.app.test_client()
+        for cl in (flash_client, quiet):
+            cl.post("/api/login", json={"email": "api@example.com", "password": "matkhau-api-123"})
+        valid = {"kind": "expense", "amount": "1000", "tx_date": "2029-04-01", "category_id": cats["Ăn uống"], "note": "flash"}
+        flash_client.post("/api/transactions", json=valid, headers={"X-Flash": "1"})
+        self.assertIn("Đã lưu giao dịch", flash_client.get("/transactions").get_data(as_text=True))
+        quiet.post("/api/transactions", json=valid)
+        self.assertNotIn("Đã lưu giao dịch", quiet.get("/transactions").get_data(as_text=True))
+
+        # --- CSRF cho API: thay đổi dữ liệu phải có header X-CSRF-Token ---
+        app.app.config["CSRF_ENABLED"] = True
+        try:
+            secure = app.app.test_client()
+            r = secure.post("/api/login", json={"email": "api@example.com", "password": "matkhau-api-123"})    # đăng nhập không cần mã CSRF
+            self.assertEqual(r.status_code, 200)
+            token = r.get_json()["csrf"]
+            self.assertEqual(secure.get("/api/transactions").status_code, 200)                                  # đọc không cần
+            self.assertEqual(secure.post("/api/transactions", json=valid).status_code, 403)
+            self.assertIn("CSRF", secure.post("/api/transactions", json=valid).get_json()["error"])
+            self.assertEqual(secure.post("/api/transactions", json=valid, headers={"X-CSRF-Token": "sai"}).status_code, 403)
+            self.assertEqual(secure.delete(f"/api/transactions/{first['id']}").status_code, 403)
+            self.assertEqual(sql_count("transactions", "id=%d" % first["id"]), 1)
+            self.assertEqual(secure.post("/api/transactions", json=valid, headers={"X-CSRF-Token": token}).status_code, 201)
+            self.assertEqual(secure.delete(f"/api/transactions/{first['id']}", headers={"X-CSRF-Token": token}).status_code, 200)
+            self.assertEqual(app.app.test_client().post("/api/transactions", json=valid).status_code, 401)    # chưa đăng nhập: 401, không phải 403
+        finally:
+            app.app.config["CSRF_ENABLED"] = False
+
+    def test_19_api_field_names_match_schema(self):
+        """19. Tên trường API thống nhất snake_case và khớp cột trong schema.sql (không categoryId / limit / createdAt)"""
+        c = app.app.test_client()
+        register(c, "naming@example.com", "matkhau-naming-1")
+        c.post("/api/login", json={"email": "naming@example.com", "password": "matkhau-naming-1"})
+        cats = {x["name"]: x["id"] for x in c.get("/api/categories").get_json()}
+        c.post("/api/transactions", json={"kind": "expense", "amount": 50000, "tx_date": "2029-05-02", "category_id": cats["Ăn uống"], "note": "đặt tên"})
+        c.post("/api/budgets", json={"month": "2029-05", "category_id": cats["Ăn uống"], "limit_amount": 40000})
+
+        def keys(o):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    yield k
+                    yield from keys(v)
+            elif isinstance(o, list):
+                for v in o:
+                    yield from keys(v)
+        found = set()
+        for path in ("/api/me", "/api/categories", "/api/transactions", "/api/budgets?month=2029-05", "/api/summary?month=2029-05", "/api/chart?month=2029-05"):
+            found |= set(keys(c.get(path).get_json()))
+        self.assertTrue(found)
+        bad = [k for k in found if not re.match(r"^[a-z][a-z0-9_]*$", k)]
+        self.assertEqual(bad, [], "khóa JSON không phải snake_case")
+        for banned in ("categoryId", "createdAt", "limit", "txDate", "limitAmount"):
+            self.assertNotIn(banned, found)
+        # các trường dữ liệu chính trùng tên cột trong schema.sql
+        schema = (BASE_DIR / "schema.sql").read_text(encoding="utf-8")
+        for col in ("category_id", "limit_amount", "tx_date", "amount", "kind", "note"):
+            self.assertIn(col, schema)
+            self.assertIn(col, found, col)
 
 
 if __name__ == "__main__":
